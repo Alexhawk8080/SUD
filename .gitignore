@@ -3,3 +3,10 @@
 /.venv
 /.vscode
 /2020 гр.xlsx
+/court_case_app/output/*
+/court_case_app/uploads/*
+*.log
+*.xlsx
+*.docx
+*.xlsm
+*.docm
