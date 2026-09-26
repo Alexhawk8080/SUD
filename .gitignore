@@ -1,12 +1,69 @@
-/.gigacode_vsc
-/.pytest_cache
-/.venv
-/.vscode
-/2020 гр.xlsx
-/court_case_app/output/*
-/court_case_app/uploads/*
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+build/
+dist/
+
+# --- Virtual env ---
+.venv/
+venv/
+env/
+
+# --- Tests / coverage ---
+.pytest_cache/
+.coverage
+coverage_html/
+htmlcov/
+
+# --- Editors / IDE ---
+.vscode/
+.idea/
+.gigacode_vsc/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Логи ---
 *.log
+*.LOG
+
+# --- Служебные файлы ---
+$null
+_release_errors.log
+
+# --- База данных (создаётся при запуске) ---
+court_case_app/database/*.db
+court_case_app/database/*.db-wal
+court_case_app/database/*.db-shm
+
+# --- Временные папки приложения ---
+court_case_app/uploads/*
+court_case_app/output/*
+!court_case_app/uploads/.gitkeep
+!court_case_app/output/.gitkeep
+
+# --- Личные файлы пользователя ---
+/2020 гр.xlsx
+/АКТ уничтожения гражданских дел 9СУ 2020.xlsm
+
+# --- Офисные документы: исключаем везде, кроме важных мест ---
 *.xlsx
-*.docx
 *.xlsm
+*.xls
 *.docm
+*.docx
+
+# Исключения: шаблон акта и релизы
+!court_case_app/docs/*.docx
+!Releases/**/*.docx
+!Releases/**/*.xlsx
+
+# --- Тестовые фикстуры (вне репозитория, см. решение 59) ---
+court_case_app/tests/fixtures/
