@@ -1,0 +1,38 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: app.py (Flask)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/court_case_app/app.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/court_case_app",
+            "justMyCode": false
+        },
+        {
+            "name": "Python: текущий файл",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/court_case_app"
+        },
+        {
+            "name": "Python: test_cases.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/court_case_app/tests/test_cases.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/court_case_app"
+        },
+        {
+            "name": "Python: run_tests.py (все тесты)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_tests.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

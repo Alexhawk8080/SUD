@@ -1,0 +1,29 @@
+[project]
+name = "court-case-app"
+version = "0.1.0"
+description = "Обработка гражданских дел для акта уничтожения документов"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "coverage_html", ".pytest_cache", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = """
+/(
+    \.venv
+  | coverage_html
+  | \.pytest_cache
+)/
+"""
+
+[tool.pytest.ini_options]
+testpaths = ["court_case_app/tests"]
+python_files = ["test_*.py"]

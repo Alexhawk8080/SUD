@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Акт уничтожения гражданских дел — конвертация</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <h1>Акт уничтожения гражданских дел</h1>
+            <nav class="nav">
+                <a class="nav-link" href="/">Обработка</a>
+                <a class="nav-link" href="/check_page">Проверка категорий</a>
+                <a class="nav-link" href="/db_page">База данных</a>
+                <a class="nav-link active" href="/convert_page">Конвертация</a>
+                <a class="nav-link" href="/inventory_page">Внутренняя опись</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="card" id="convert-card">
+            <h2>Конвертация Excel -> Word</h2>
+            <p class="hint">Загрузите Excel-результат («Результат обработки») —
+                программа подставит данные в Word-акт по шаблону.</p>
+            <div class="form-row">
+                <span class="field-label">Направление:</span>
+                <label class="radio-row">
+                    <input type="radio" name="direction" value="xlsx_to_word" checked>
+                    Excel -> Word
+                </label>
+                <label class="radio-row">
+                    <input type="radio" name="direction" value="word_to_xlsx">
+                    Word -> Excel
+                </label>
+            </div>
+
+            <div class="drop-zone" id="drop-zone">
+                <p class="drop-hint" id="drop-hint">Перетащите .xlsx/.xlsm сюда или нажмите для выбора</p>
+                <input type="file" id="file-input" accept=".xlsx,.xlsm">
+            </div>
+            <p class="file-info" id="file-info"></p>
+        </section>
+
+        <section class="card hidden" id="params-card">
+            <h2>Параметры конвертации</h2>
+            <div class="form-row">
+                <label class="field">
+                    Лист
+                    <select id="conv-sheet" style="min-width: 220px;"></select>
+                </label>
+                <label class="field">
+                    Год дел
+                    <input type="number" id="conv-year" placeholder="2020"
+                           min="1990" max="2100">
+                </label>
+                <label class="field">
+                    Судебный участок
+                    <select id="conv-court-area" style="min-width: 260px;">
+                        <option value="">Не выбран — использовать настройки</option>
+                    </select>
+                </label>
+            </div>
+            <p class="hint" id="conv-year-warning"></p>
+            <div class="form-row hidden" id="w2x-extra">
+                <label class="checkbox-row">
+                    <input type="checkbox" id="restore-gaps">
+                    Восстановить пропущенные номера дел (пустыми строками)
+                </label>
+            </div>
+        </section>
+
+        <section class="card hidden" id="refs-card">
+            <h2 id="refs-card-title">Реквизиты акта</h2>
+            <p class="hint">Заполняются из выбранного участка (или из настроек,
+                если участок не выбран). Можно править — правки применяются
+                к текущей конвертации. Кнопки ниже пишут правки в БД.</p>
+            <div class="form-row">
+                <label class="field">Номер участка
+                    <input type="text" id="conv-ca-номер">
+                </label>
+                <label class="field">Судья
+                    <input type="text" id="conv-ca-судья">
+                </label>
+                <label class="field">Секретарь
+                    <input type="text" id="conv-ca-секретарь">
+                </label>
+            </div>
+            <div class="form-row">
+                <label class="field">№ акта
+                    <input type="text" id="conv-ca-номер_акта">
+                </label>
+                <label class="field">Дата утверждения
+                    <input type="text" id="conv-ca-дата_утверждения">
+                </label>
+                <label class="field">Дата акта
+                    <input type="text" id="conv-ca-дата_акта">
+                </label>
+                <label class="field">Дата подписи
+                    <input type="text" id="conv-ca-дата_подписи">
+                </label>
+            </div>
+            <div class="form-row">
+                <label class="field">Протокол ЭК: дата
+                    <input type="text" id="conv-ca-протокол_эк_дата">
+                </label>
+                <label class="field">Протокол ЭК: номер
+                    <input type="text" id="conv-ca-протокол_эк_номер">
+                </label>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" id="conv-save-area">Обновить участок</button>
+                <button class="btn btn-secondary" id="conv-create-area">Создать новый участок</button>
+            </div>
+            <p class="hint" id="conv-refs-hint"></p>
+        </section>
+
+        <section class="card hidden" id="convert-action-card">
+            <h2>Запуск</h2>
+            <button class="btn btn-primary" id="convert-btn">Конвертировать</button>
+            <p class="error" id="error-box"></p>
+        </section>
+
+        <section class="card hidden" id="attention-card">
+            <h2>Требует внимания</h2>
+            <p class="hint">Строки акта, которые удалось распознать не полностью.
+                Они попали в Excel, но требуют ручной проверки.</p>
+            <div class="table-wrap">
+                <table class="data-table" id="attention-table">
+                    <thead>
+                        <tr><th>Строка</th><th>№ дела</th><th>Причина</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="card hidden" id="result-card">
+            <h2>Результат</h2>
+            <pre class="stats" id="conv-stats"></pre>
+            <div class="actions">
+                <a class="btn btn-success hidden" id="conv-download-link" href="#">Скачать файл</a>
+            </div>
+            <div class="table-wrap">
+                <table class="preview" id="conv-preview-table">
+                    <thead>
+                        <tr>
+                            <th>№ п/п</th>
+                            <th>Заголовок дела</th>
+                            <th>Даты дела</th>
+                            <th>№ описи</th>
+                            <th>№ ед.хр.</th>
+                            <th>Кол-во</th>
+                            <th>Срок хранения</th>
+                            <th>Примечание</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <details id="conv-refs-details" style="margin-top: 12px;">
+                <summary style="cursor: pointer;">Реквизиты акта (использованы)</summary>
+                <pre class="stats" id="conv-refs-used"></pre>
+            </details>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>Программа подготовки акта о выделении к уничтожению документов (гражданские дела)</p>
+    </footer>
+
+    <div class="modal hidden" id="conflict-modal">
+        <div class="modal-content">
+            <h3>Файл уже существует</h3>
+            <p id="conflict-text"></p>
+            <div class="actions">
+                <button class="btn btn-primary" id="conflict-replace">Заменить</button>
+                <button class="btn btn-secondary" id="conflict-copy">Сохранить как копию</button>
+                <button class="btn btn-danger" id="conflict-cancel">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

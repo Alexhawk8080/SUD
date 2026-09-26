@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Акт уничтожения гражданских дел — база данных</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <h1>База данных</h1>
+            <nav class="nav">
+                <a class="nav-link" href="/">Обработка</a>
+                <a class="nav-link" href="/check_page">Проверка категорий</a>
+                <a class="nav-link active" href="/db_page">База данных</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <p class="error" id="error-box"></p>
+
+        <section class="card">
+            <h2>Организации (первое слово → тип подачи)</h2>
+            <p class="hint">Добавленное слово не склоняется в заголовках дел и участвует в определении префикса «по иску»/«по заявлению».</p>
+            <div class="form-row">
+                <input type="text" id="org-name" placeholder="Слово (например, ООО)">
+                <select id="org-type">
+                    <option value="по иску">по иску</option>
+                    <option value="по заявлению">по заявлению</option>
+                </select>
+                <button class="btn btn-primary" id="org-add">Добавить</button>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table" id="org-table">
+                    <thead><tr><th>Слово</th><th>Тип подачи</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Импорт / экспорт базы данных</h2>
+            <div class="form-row">
+                <input type="file" id="db-import-file" accept=".xlsx,.xlsm">
+                <button class="btn btn-primary" id="db-import-btn">Импортировать организации из Excel</button>
+                <a class="btn btn-success" id="db-export-link" href="/api/db/export">Экспортировать базу в Excel</a>
+            </div>
+            <p class="hint">Импорт читает лист «База данных»: колонка A — первое слово организации, колонка B — тип подачи (как в файле «АКТ уничтожения гражданских дел N.xlsm»). Существующие записи не перезаписываются.</p>
+        </section>
+
+        <section class="card">
+            <h2>Правила сроков хранения (корень слова → тип)</h2>
+            <div class="form-row">
+                <input type="text" id="rule-keyword" placeholder="Корень (например, кредит)">
+                <input type="text" id="rule-code" placeholder="Код (например, credit_loan)">
+                <input type="text" id="rule-text" placeholder="Результат (3 года Ст. 223)">
+                <button class="btn btn-primary" id="rule-add">Добавить</button>
+            </div>
+            <p class="hint">Порядок важен: первое совпадение корня в слове категории определяет срок. Дефолт для прочего — «3 года Ст. 227».</p>
+            <div class="table-wrap">
+                <table class="data-table" id="rule-table">
+                    <thead><tr><th>Корень</th><th>Код</th><th>Результат</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Реквизиты акта</h2>
+            <div class="settings-grid" id="settings-form"></div>
+            <button class="btn btn-primary" id="settings-save">Сохранить настройки</button>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>Программа подготовки акта о выделении к уничтожению документов (гражданские дела)</p>
+    </footer>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>App.initDbPage();</script>
+</body>
+</html>
