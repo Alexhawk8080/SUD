@@ -128,9 +128,9 @@ def main():
     check("years_created = 1", report["years_created"], 1)
     check("settings_deleted = 9", report["settings_deleted"], 9)
 
-    print("\n[3] После миграции: схема v2")
+    print("\n[3] После миграции: схема v3")
     conn = db.init_db(db_path)
-    check("schema_version = v2", db.get_schema_version(conn), "v2")
+    check("schema_version = v3", db.get_schema_version(conn), "v3")
 
     print("\n[4] Участок перенесён")
     areas = db.list_court_areas(conn)
@@ -157,8 +157,8 @@ def main():
         check(f"Нет '{legacy}'", legacy in settings, False)
     check("auto_fix_categories остался",
           settings.get("auto_fix_categories"), "1")
-    check("schema_version = v2",
-          settings.get("schema_version"), "v2")
+    check("schema_version = v3",
+          settings.get("schema_version"), "v3")
 
     print("\n[7] Повторная миграция: схема уже v2")
     report2 = migrate_db_v2.migrate(db_path)

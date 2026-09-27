@@ -170,6 +170,27 @@ def main():
     print("\n[8] summary для несуществующего года -> 404")
     check("404", client.get("/api/court_years/99999/summary").status_code, 404)
 
+    print("\n[9] D8c-2: поле admin_retention в «Реквизитах»")
+    r = client.get("/db/year/1/refs")
+    html = r.get_data(as_text=True)
+    check("поле ref-admin_retention в HTML",
+          'id="ref-admin_retention"' in html, True)
+    js_path = os.path.join(os.path.dirname(__file__), "..", "static", "js",
+                           "year_page.js")
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    check("admin_retention в REF_FIELDS", '"admin_retention"' in js, True)
+    # API отдаёт и принимает admin_retention
+    r = client.get(f"/api/court_years/{yid}")
+    check("GET отдаёт admin_retention",
+          "admin_retention" in r.get_json(), True)
+    r = client.put(f"/api/court_years/{yid}",
+                   json={**year_data("20"), "admin_retention": "3 года Ст. 1"})
+    check("PUT admin_retention 200", r.status_code, 200)
+    r = client.get(f"/api/court_years/{yid}")
+    check("admin_retention сохранён",
+          r.get_json()["admin_retention"], "3 года Ст. 1")
+
     print(f"\nИТОГО: пройдено {PASSED}, ошибок {FAILED}")
     sys.exit(1 if FAILED else 0)
 

@@ -24,7 +24,10 @@ from core.retention import (
     DEFAULT_RETENTION_TEXT,
 )
 
-SCHEMA_VERSION = "v2"
+SCHEMA_VERSION = "v3"
+
+# D8c: срок хранения административных дел по умолчанию (единый на год)
+DEFAULT_ADMIN_RETENTION = "2 года Ст. 369"
 
 # Начальный список организаций (первое слово -> тип подачи)
 INITIAL_ORGANIZATIONS = [
@@ -113,6 +116,7 @@ CREATE TABLE IF NOT EXISTS court_years (
     note TEXT NOT NULL DEFAULT '',
     is_incomplete INTEGER NOT NULL DEFAULT 0,
     is_closed INTEGER NOT NULL DEFAULT 0,
+    admin_retention TEXT NOT NULL DEFAULT '2 года Ст. 369',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(court_area_id, year),
@@ -278,7 +282,7 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 def _detect_schema_version(conn) -> str:
     """
-    Определяет версию схемы: 'empty', 'v1', 'v2'.
+    Определяет версию схемы: 'empty', 'v1', 'v2', 'v3'.
     """
     has_settings = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"
@@ -295,6 +299,25 @@ def _detect_schema_version(conn) -> str:
         "SELECT name FROM sqlite_master WHERE type='table' AND name='court_years'"
     ).fetchone()
     return "v2" if has_years else "v1"
+
+
+def _migrate_v2_to_v3(conn) -> None:
+    """
+    D8c: миграция v2 -> v3 — добавление court_years.admin_retention.
+
+    Идемпотентно: если колонка уже есть, ничего не делает.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(court_years)")}
+    if "admin_retention" not in cols:
+        conn.execute(
+            "ALTER TABLE court_years ADD COLUMN admin_retention "
+            f"TEXT NOT NULL DEFAULT '{DEFAULT_ADMIN_RETENTION}'")
+        conn.commit()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('schema_version', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (SCHEMA_VERSION,))
+    conn.commit()
 
 
 def get_schema_version(conn) -> str:
@@ -340,8 +363,9 @@ def init_db(db_path: str) -> sqlite3.Connection:
     Создание схемы, начальное наполнение; возвращает соединение.
 
     Для схемы v1 (старой) — выбрасывает RuntimeError: нужна миграция.
-    Для пустой БД — создаёт v2 и сразу ставит schema_version='v2'.
-    Для v2 — просто открывает.
+    Для пустой БД — создаёт v3 и сразу ставит schema_version='v3'.
+    Для v2 — автоматически мигрирует до v3 (ALTER TABLE admin_retention).
+    Для v3 — просто открывает.
     """
     conn = connect(db_path)
     version = _detect_schema_version(conn)
@@ -358,6 +382,9 @@ def init_db(db_path: str) -> sqlite3.Connection:
 
     if version == "empty":
         _init_schema_version(conn)
+    elif version == "v2":
+        # D8c: авто-миграция v2 -> v3
+        _migrate_v2_to_v3(conn)
 
     return conn
 
@@ -620,7 +647,8 @@ def _year_row_to_dict(r) -> dict:
         "дата_подписи": r[8],
         "протокол_эк_дата": r[9], "протокол_эк_номер": r[10],
         "note": r[11], "is_incomplete": bool(r[12]), "is_closed": bool(r[13]),
-        "created_at": r[14], "updated_at": r[15],
+        "admin_retention": r[14],
+        "created_at": r[15], "updated_at": r[16],
     }
 
 
@@ -628,7 +656,7 @@ _YEAR_COLS = (
     "id, court_area_id, year, судья, секретарь, "
     "дата_утверждения, дата_акта, номер_акта, дата_подписи, "
     "протокол_эк_дата, протокол_эк_номер, note, is_incomplete, is_closed, "
-    "created_at, updated_at"
+    "admin_retention, created_at, updated_at"
 )
 
 
@@ -661,34 +689,49 @@ def court_year_for(conn, court_area_id: int, year: int):
 
 def add_court_year(conn, court_area_id: int, year: int, data: dict) -> int:
     values = [(data.get(f) or "").strip() for f in _COURT_YEAR_FIELDS]
+    admin_retention = ((data.get("admin_retention") or "").strip()
+                       or DEFAULT_ADMIN_RETENTION)
     conn.execute(
         "INSERT INTO court_years (court_area_id, year, "
         "судья, секретарь, дата_утверждения, дата_акта, номер_акта, "
         "дата_подписи, протокол_эк_дата, протокол_эк_номер, "
-        "note, is_incomplete, is_closed) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "note, is_incomplete, is_closed, admin_retention) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (court_area_id, int(year), *values,
          (data.get("note") or "").strip(),
          _is_incomplete(dict(zip(_COURT_YEAR_FIELDS, values))),
-         1 if data.get("is_closed") else 0))
+         1 if data.get("is_closed") else 0,
+         admin_retention))
     conn.commit()
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
 def update_court_year(conn, year_id: int, data: dict) -> None:
     values = [(data.get(f) or "").strip() for f in _COURT_YEAR_FIELDS]
+    # admin_retention: если ключ не передан — сохраняем текущее значение
+    if "admin_retention" in data:
+        admin_retention = ((data.get("admin_retention") or "").strip()
+                           or DEFAULT_ADMIN_RETENTION)
+    else:
+        row = conn.execute(
+            "SELECT admin_retention FROM court_years WHERE id = ?",
+            (year_id,)).fetchone()
+        admin_retention = (row[0] if row and row[0]
+                           else DEFAULT_ADMIN_RETENTION)
     conn.execute(
         "UPDATE court_years SET "
         "судья = ?, секретарь = ?, дата_утверждения = ?, дата_акта = ?, "
         "номер_акта = ?, дата_подписи = ?, "
         "протокол_эк_дата = ?, протокол_эк_номер = ?, "
         "note = ?, is_incomplete = ?, is_closed = ?, "
+        "admin_retention = ?, "
         "updated_at = datetime('now') "
         "WHERE id = ?",
         (*values,
          (data.get("note") or "").strip(),
          _is_incomplete(dict(zip(_COURT_YEAR_FIELDS, values))),
          1 if data.get("is_closed") else 0,
+         admin_retention,
          year_id))
     conn.commit()
 

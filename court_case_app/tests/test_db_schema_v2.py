@@ -36,10 +36,10 @@ def main():
 
     print("[1] schema_version")
     conn = db.init_db(db_path)
-    check("v2", db.get_schema_version(conn), "v2")
-    check("settings.schema_version = 'v2'",
+    check("v3", db.get_schema_version(conn), "v3")
+    check("settings.schema_version = 'v3'",
           conn.execute("SELECT value FROM settings WHERE key='schema_version'")
-          .fetchone()[0], "v2")
+          .fetchone()[0], "v3")
 
     print("\n[2] Все таблицы v2 созданы")
     names = {r[0] for r in conn.execute(
@@ -101,8 +101,8 @@ def main():
     conn = db.init_db(db_path)
     orgs = db.list_organizations(conn)
     check("ООО одно", sum(1 for o in orgs if o["name"] == "ООО"), 1)
-    check("schema_version всё ещё v2",
-          db.get_schema_version(conn), "v2")
+    check("schema_version всё ещё v3",
+          db.get_schema_version(conn), "v3")
     conn.close()
 
     print(f"\nИТОГО: пройдено {PASSED}, ошибок {FAILED}")

@@ -130,6 +130,9 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 TEMPLATE_DOCX = os.path.join(
     BASE_DIR, "docs", "АКТ уничтожения гражданских дел.docx")
+# D8d: отдельный шаблон для административных дел
+TEMPLATE_DOCX_ADMIN = os.path.join(
+    BASE_DIR, "docs", "АКТ уничтожения административных дел.docx")
 
 # Heartbeat: если вкладка интерфейса закрыта и heartbeat пропал — остановить сервер.
 # Web Worker шлёт heartbeat каждые 4 с; таймаут 120 с — с запасом на:
@@ -1336,6 +1339,7 @@ def api_result_export(result_id):
         result = export_year_result_to_file(
             conn, result_id,
             template_path=TEMPLATE_DOCX,
+            template_path_admin=TEMPLATE_DOCX_ADMIN,
             output_dir=OUTPUT_DIR,
             output_format=output_format,
             columns=columns)

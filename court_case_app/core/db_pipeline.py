@@ -23,6 +23,50 @@ from core.excel_reader import read_source_table
 from database import db as _db
 
 
+def _admin_row_to_case(row, target_year, row_index: int) -> dict:
+    """
+    D8a: преобразует AdminRow в dict для db.add_cases_bulk.
+
+    Переиспользование колонок cases:
+        person -> applicants, article -> category, task -> note,
+        in_number -> opis_number, act_state -> skip_reason
+        (для валидных дел; для невалидных skip_reason хранит причину).
+    """
+    from core.admin_processor import (
+        is_valid_admin_case_number,
+        normalize_article,
+    )
+
+    case_number = row.get("case_number")
+    article = row.get("article")
+
+    valid = bool(is_valid_admin_case_number(case_number, target_year))
+    if valid:
+        # act_state — служебная информация (для просмотра в UI)
+        skip_reason = ("" if row.get("act_state") is None
+                       else str(row.get("act_state")))
+    else:
+        skip_reason = "неверный формат или год номера дела"
+
+    return {
+        "case_type": "admin",
+        "row_index": row_index,
+        "date": format_date(row.get("date")),
+        "case_number": "" if case_number is None else str(case_number).strip(),
+        "applicants": "" if row.get("person") is None else str(row.get("person")),
+        "respondents": "",
+        "category": normalize_article(article),
+        "opis_number": "" if row.get("in_number") is None else str(row.get("in_number")),
+        "unit_number": "",
+        "note": "" if row.get("task") is None else str(row.get("task")),
+        "end_date": format_date(row.get("end_date")),
+        "is_valid": valid,
+        "is_alimony": False,
+        "is_problematic": False,
+        "skip_reason": skip_reason,
+    }
+
+
 def _row_to_case(row, target_year, row_index: int,
                  case_type: str = "civil") -> dict:
     """Преобразует SourceRow в dict для db.add_cases_bulk."""
@@ -105,9 +149,14 @@ def save_year_source_from_xlsx(conn, court_year_id: int, filepath: str,
     with open(filepath, "rb") as f:
         content = f.read()
 
-    # Разбор
-    headers, rows, used_mapping = read_source_table(
-        filepath, mapping=mapping, header_row=header_row)
+    # D8a: выбор reader по типу дел
+    if case_type == "admin":
+        from core.admin_reader import read_admin_table
+        headers, rows, used_mapping = read_admin_table(
+            filepath, mapping=mapping, header_row=header_row)
+    else:
+        headers, rows, used_mapping = read_source_table(
+            filepath, mapping=mapping, header_row=header_row)
 
     # Преобразуем строки в дела
     cases = []
@@ -115,7 +164,10 @@ def save_year_source_from_xlsx(conn, court_year_id: int, filepath: str,
     alimony_count = 0
     problematic_count = 0
     for idx, row in enumerate(rows, start=1):
-        case = _row_to_case(row, target_year, idx, case_type=case_type)
+        if case_type == "admin":
+            case = _admin_row_to_case(row, target_year, idx)
+        else:
+            case = _row_to_case(row, target_year, idx, case_type=case_type)
         if case["is_valid"]:
             valid_count += 1
         if case["is_alimony"]:
@@ -221,35 +273,53 @@ def process_year(conn, court_year_id: int, *, case_type: str = "civil",
         raise ValueError(
             f"В файле нет дел типа {case_type}. Нечего обрабатывать.")
 
-    # 3. Преобразование в строки для process_cases
+    # 3. Преобразование в строки
+    # D8e: для admin-дел роли отличаются (person/article/task/in_number/
+    # act_state), поэтому собираем строки в формате, ожидаемом
+    # process_admin_cases (см. admin_processor.build_admin_record).
     rows = []
     for c in raw_cases:
-        rows.append({
-            "date": c["date"],
-            "case_number": c["case_number"],
-            "applicants": c["applicants"],
-            "respondents": c["respondents"],
-            "category": c["category"],
-            "opis_number": c["opis_number"],
-            "unit_number": c["unit_number"],
-            "note": c["note"],
-            "end_date": c["end_date"],
-        })
+        if case_type == "admin":
+            rows.append({
+                "date": c["date"],
+                "case_number": c["case_number"],
+                "person": c["applicants"],
+                "article": c["category"],
+                "task": c["note"],
+                "in_number": c["opis_number"],
+                "act_state": c["skip_reason"],
+                "end_date": c["end_date"],
+            })
+        else:
+            rows.append({
+                "date": c["date"],
+                "case_number": c["case_number"],
+                "applicants": c["applicants"],
+                "respondents": c["respondents"],
+                "category": c["category"],
+                "opis_number": c["opis_number"],
+                "unit_number": c["unit_number"],
+                "note": c["note"],
+                "end_date": c["end_date"],
+            })
 
-    # 4. Справочники
-    organizations = _db.organizations_dict(conn)
-    exclusions = _db.organization_names(conn)
-    keywords, texts = _db.load_retention_rules(conn)
-    auto_fix_map = (_db.case_categories_map(conn)
-                    if auto_fix_enabled else None)
-
-    # 5. Обработка
-    records, stats = process_cases(
-        rows, target_year, process_alimony,
-        organizations, exclusions,
-        keywords=keywords, texts=texts,
-        category_fixes=category_fixes or None,
-        auto_fix_map=auto_fix_map or None)
+    # 4-5. Обработка (D8b: отдельная ветка для admin)
+    if case_type == "admin":
+        from core.admin_processor import process_admin_cases
+        retention = (cy.get("admin_retention") or "").strip() or "2 года Ст. 369"
+        records, stats = process_admin_cases(rows, target_year, retention)
+    else:
+        organizations = _db.organizations_dict(conn)
+        exclusions = _db.organization_names(conn)
+        keywords, texts = _db.load_retention_rules(conn)
+        auto_fix_map = (_db.case_categories_map(conn)
+                        if auto_fix_enabled else None)
+        records, stats = process_cases(
+            rows, target_year, process_alimony,
+            organizations, exclusions,
+            keywords=keywords, texts=texts,
+            category_fixes=category_fixes or None,
+            auto_fix_map=auto_fix_map or None)
 
     # 6. Дополняем case_number (извлекаем из title)
     for r in records:
@@ -285,17 +355,20 @@ def process_year(conn, court_year_id: int, *, case_type: str = "civil",
 def export_year_result_to_file(conn, result_id: int, *, template_path: str,
                                output_dir: str,
                                output_format: str = "word",
-                               columns: list = None) -> dict:
+                               columns: list = None,
+                               template_path_admin: str = None) -> dict:
     """
     Экспорт сохранённого результата в .docx / .xlsx.
 
     Параметры:
         conn         — соединение SQLite;
         result_id    — id processing_results;
-        template_path — путь к Word-шаблону (для 'word');
+        template_path — путь к Word-шаблону (гражданский, для 'word');
         output_dir   — папка для выходного файла;
         output_format — 'word' | 'excel';
-        columns      — список столбцов для Excel (None = все 8).
+        columns      — список столбцов для Excel (None = все 8);
+        template_path_admin — путь к admin-шаблону (D8d; если None —
+                              используется template_path).
 
     Возвращает:
         {"path": ..., "filename": ..., "record_count": ...}
@@ -353,7 +426,12 @@ def export_year_result_to_file(conn, result_id: int, *, template_path: str,
 
     if output_format == "word":
         from core.word_writer import write_word_result
-        write_word_result(records, template_path, path, common)
+        # D8d: выбор шаблона по типу дел
+        tpl = template_path
+        if res.get("case_type") == "admin" and template_path_admin:
+            tpl = template_path_admin
+        write_word_result(records, tpl, path, common,
+                          case_type=res.get("case_type") or "civil")
     else:
         from core.excel_writer import write_excel_result, DEFAULT_KEYS
         write_excel_result(records, path, columns=columns or DEFAULT_KEYS)

@@ -35,8 +35,14 @@ ROW_PLACEHOLDERS = [ph for ph, _ in ROW_FIELD_MAP]
 COMMON_PLACEHOLDERS = [
     "судебный_участок", "судья", "дата_утверждения", "дата_акта",
     "номер_акта", "итого", "год_дел", "секретарь", "дата_подписи",
-    "протокол_эк_дата", "протокол_эк_номер",
+    "протокол_эк_дата", "протокол_эк_номер", "количество_прописью",
 ]
+
+# D8d: формулировка {{итого}} по типу дел
+_ITOGO_TYPE_WORD = {
+    "civil": "гражданских дел",
+    "admin": "административных дел",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +247,7 @@ def _fill_table_row(tr_element, record: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def write_word_result(records, template_path: str, filepath: str,
-                      common_values: dict) -> str:
+                      common_values: dict, case_type: str = "civil") -> str:
     """
     Формирование Word-документа по шаблону.
 
@@ -252,7 +258,8 @@ def write_word_result(records, template_path: str, filepath: str,
         common_values  — словарь реквизитов: ключ -> значение
                          (судебный_участок, судья, дата_утверждения,
                          дата_акта, номер_акта, секретарь, дата_подписи,
-                         протокол_эк_дата, протокол_эк_номер и др.).
+                         протокол_эк_дата, протокол_эк_номер и др.);
+        case_type      — 'civil' | 'admin' (D8d: формулировка {{итого}}).
 
     Возвращает filepath.
     """
@@ -272,8 +279,12 @@ def write_word_result(records, template_path: str, filepath: str,
     count = len(filled_records)
     # fix_03: если год пришёл как None (ключ есть, значение None) — ""
     year = common.get("год_дел") or ""
+    type_word = _ITOGO_TYPE_WORD.get(str(case_type or "civil").strip(),
+                                     _ITOGO_TYPE_WORD["civil"])
     common["итого"] = (f"Итого {count} ({number_to_words(count)}) "
-                       f"гражданских дел за")
+                       f"{type_word} за")
+    # D8d: число дел прописью (для admin-шаблона)
+    common["количество_прописью"] = number_to_words(count)
 
     # 1. Замена общих реквизитов в абзацах документа (вне таблиц)
     for p, is_table in _iter_paragraphs(body):

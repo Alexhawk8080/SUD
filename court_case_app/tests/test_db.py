@@ -73,8 +73,8 @@ def main():
     # в court_years. Проверяем служебный ключ.
     check("Настройки заполнены (auto_fix_categories)",
           settings.get("auto_fix_categories"), "1")
-    check("schema_version = v2",
-          settings.get("schema_version"), "v2")
+    check("schema_version = v3",
+          settings.get("schema_version"), "v3")
 
     print("\n[2] CRUD: организации")
     new_id = db.add_organization(conn, "РАЙПО", "по заявлению")

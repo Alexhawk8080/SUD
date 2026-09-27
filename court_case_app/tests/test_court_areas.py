@@ -42,9 +42,9 @@ def main():
     tmp = tempfile.mkdtemp(prefix="areas_v2_")
     db_path = os.path.join(tmp, "app.db")
 
-    print("[1] Схема v2, пустые участки")
+    print("[1] Схема v3, пустые участки")
     conn = db.init_db(db_path)
-    check("schema_version = v2", db.get_schema_version(conn), "v2")
+    check("schema_version = v3", db.get_schema_version(conn), "v3")
     check("Участков нет", db.list_court_areas(conn), [])
     settings = db.get_settings(conn)
     check("auto_fix_categories есть", settings.get("auto_fix_categories"), "1")
