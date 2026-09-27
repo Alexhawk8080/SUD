@@ -12,7 +12,6 @@ from core.case_processor import process_cases
 from core.excel_writer import write_excel_result, DEFAULT_KEYS
 from core.word_writer import write_word_result
 
-
 def process_upload(filepath: str, target_year, process_alimony: bool,
                    output_format: str, db_path: str, template_path: str,
                    output_dir: str, columns=None, mapping=None,
@@ -54,7 +53,6 @@ def process_upload(filepath: str, target_year, process_alimony: bool,
         auto_fix_enabled=auto_fix_enabled,
         used_mapping=used_mapping,
         court_area_id=court_area_id)
-
 
 def process_rows(rows, target_year, process_alimony: bool,
                  output_format: str, db_path: str, template_path: str,
@@ -136,7 +134,7 @@ def process_rows(rows, target_year, process_alimony: bool,
         write_word_result(records, template_path, out_path, common_values)
     else:
         cols = columns if columns else DEFAULT_KEYS
-        filename = f"{base}.xlsx"
+
         out_path = os.path.join(output_dir, filename)
         write_excel_result(records, out_path, columns=cols)
 
