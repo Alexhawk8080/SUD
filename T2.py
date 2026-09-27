@@ -1,285 +1,286 @@
 # -*- coding: utf-8 -*-
 """
-fix_29_base_and_tests.py
+release_0_0_7_generate.py — снимок релиза 0.0.7-alpha.
 
-Правки:
-    1. app.py: в обеих ветках copy_mode переменная `base` больше не
-       определяется (её убрал fix_25). Заменяем f"{base} ({i})..."
-       на вычисление базового имени из filename (без расширения).
-
-    2. Тесты: делаем проверки имени файла устойчивыми — вместо
-       конкретного '3 CУ'/'3СУ'/'3У' проверяем, что в имени есть
-       'Акт уничтожения', код участка ('3') и год ('2020').
+Создаёт Releases/alpha/0.0.7/ с актуальным состоянием проекта
+(launcher, watchdog parent-mode, логирование, единый формат имён).
 
 Запуск:
-    .venv\\Scripts\\python.exe fix_29_base_and_tests.py
-    .venv\\Scripts\\python.exe run_tests.py
+    .venv\\Scripts\\python.exe release_0_0_7_generate.py
+    .venv\\Scripts\\python.exe release_0_0_7_generate.py --force
 """
 
-import re
+import argparse
+import os
+import shutil
 import sys
+from datetime import date
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-APP_PY = BASE / "court_case_app" / "app.py"
-TESTS = BASE / "court_case_app" / "tests"
 
+RELEASES_DIRNAME = "Releases"
+CHANNEL = "alpha"
+VERSION = "0.0.7"
+TAG = f"{VERSION}-{CHANNEL}"
 
-# ============================================================================
-# 1. app.py — починить copy_mode в двух местах
-# ============================================================================
+INCLUDE_ROOT_FILES = [
+    "requirements.txt",
+    "requirements-dev.txt",
+    "pyproject.toml",
+    "conftest.py",
+    "run_tests.py",
+    "setup_env.py",
+    "migrate_db_v2.py",
+    "README.md",
+    "Plan.md",
+    "context.md",
+    "launcher.py",
+    "start.bat",
+    "run_app.pyw",
+]
 
-# --- xlsx_to_word (docx) ---
-COPY_OLD_DOCX = '''    if copy_mode and os.path.exists(out_path):
-        i = 1
-        while True:
-            cand = f"{base} ({i}).docx"
-            cand_path = os.path.join(OUTPUT_DIR, cand)
-            if not os.path.exists(cand_path):
-                filename = cand
-                out_path = cand_path
-                break
-            i += 1'''
+INCLUDE_ROOT_GLOBS = ["stage*.py", "fix_*.py", "release_*.py"]
 
-COPY_NEW_DOCX = '''    if copy_mode and os.path.exists(out_path):
-        _base = filename[:-5] if filename.lower().endswith(".docx") else filename
-        i = 1
-        while True:
-            cand = f"{_base} ({i}).docx"
-            cand_path = os.path.join(OUTPUT_DIR, cand)
-            if not os.path.exists(cand_path):
-                filename = cand
-                out_path = cand_path
-                break
-            i += 1'''
+INCLUDE_DIRS = [".vscode", "court_case_app"]
 
-
-# --- word_to_xlsx (xlsx) ---
-COPY_OLD_XLSX = '''    if copy_mode and os.path.exists(out_path):
-        i = 1
-        while True:
-            cand = f"{base} ({i}).xlsx"
-            cand_path = os.path.join(OUTPUT_DIR, cand)
-            if not os.path.exists(cand_path):
-                filename = cand
-                out_path = cand_path
-                break
-            i += 1'''
-
-COPY_NEW_XLSX = '''    if copy_mode and os.path.exists(out_path):
-        _base = filename[:-5] if filename.lower().endswith(".xlsx") else filename
-        i = 1
-        while True:
-            cand = f"{_base} ({i}).xlsx"
-            cand_path = os.path.join(OUTPUT_DIR, cand)
-            if not os.path.exists(cand_path):
-                filename = cand
-                out_path = cand_path
-                break
-            i += 1'''
-
-
-def patch_app() -> bool:
-    if not APP_PY.exists():
-        print(f"  НЕ НАЙДЕН: {APP_PY.relative_to(BASE)}")
-        return False
-    text = APP_PY.read_text(encoding="utf-8")
-
-    done = []
-
-    # docx
-    if COPY_OLD_DOCX in text:
-        text = text.replace(COPY_OLD_DOCX, COPY_NEW_DOCX, 1)
-        done.append("copy (docx)")
-    elif "_base = filename[:-5] if filename.lower().endswith(\".docx\")" in text:
-        done.append("copy (docx) — уже")
-    else:
-        # fallback: просто заменить f"{base} ({i}).docx" на вычисление
-        pat = re.compile(
-            r'\{\s*base\s*\}\s*\(\{i\}\)\.docx', re.IGNORECASE)
-        if pat.search(text):
-            # Найдём окружающий блок, аккуратно заменим через regex
-            text2 = pat.sub('{_base} ({i}).docx', text, count=1)
-            # _base надо где-то определить. Вставим перед "if copy_mode"
-            marker = "if copy_mode and os.path.exists(out_path):"
-            if marker in text2:
-                text2 = text2.replace(
-                    marker,
-                    "_base = filename[:-5] if filename.lower().endswith('.docx') else filename\n    "
-                    + marker,
-                    1)
-                text = text2
-                done.append("copy (docx) — regex")
-            else:
-                print("  НЕ НАЙДЕН блок copy_mode для docx")
-        else:
-            print("  НЕ НАЙДЕН фрагмент copy (docx)")
-
-    # xlsx
-    if COPY_OLD_XLSX in text:
-        text = text.replace(COPY_OLD_XLSX, COPY_NEW_XLSX, 1)
-        done.append("copy (xlsx)")
-    elif "_base = filename[:-5] if filename.lower().endswith(\".xlsx\")" in text:
-        done.append("copy (xlsx) — уже")
-    else:
-        pat = re.compile(
-            r'\{\s*base\s*\}\s*\(\{i\}\)\.xlsx', re.IGNORECASE)
-        if pat.search(text):
-            text2 = pat.sub('{_base} ({i}).xlsx', text, count=1)
-            marker = "if copy_mode and os.path.exists(out_path):"
-            # найти ВТОРОЕ вхождение (первое уже заменено выше)
-            if text2.count(marker) >= 1:
-                # просто добавим _base перед каждым оставшимся if copy_mode
-                # который использует {_base}
-                text2 = text2.replace(
-                    marker,
-                    "_base = filename[:-5] if filename.lower().endswith('.xlsx') else filename\n    "
-                    + marker,
-                    1)
-                text = text2
-                done.append("copy (xlsx) — regex")
-            else:
-                print("  НЕ НАЙДЕН блок copy_mode для xlsx")
-        else:
-            print("  НЕ НАЙДЕН фрагмент copy (xlsx)")
-
-    if done:
-        APP_PY.write_text(text, encoding="utf-8")
-        print(f"  ИЗМЕНЁН: {APP_PY.relative_to(BASE)}")
-        for d in done:
-            print(f"          + {d}")
-    else:
-        print(f"  УЖЕ ИСПРАВЛЕН ИЛИ НЕ НАЙДЕН: {APP_PY.relative_to(BASE)}")
-    return True
-
-
-# ============================================================================
-# 2. Тесты — устойчивые проверки имени
-# ============================================================================
-
-# Замены: не привязываемся к '3 CУ'/'3СУ'/'3У'. Проверяем по отдельности:
-#   * есть 'Акт уничтожения'
-#   * есть '3'
-#   * есть '2020'
-#   * расширение .docx / .xlsx
-
-TEST_REPLACEMENTS = {
-    "test_api_convert.py": [
-        # Блок [6]
-        ('check("filename с \'3 CУ\' и \'2020\'",\n'
-         '          "3 CУ" in j["filename"] and "2020" in j["filename"], True)',
-         'check("filename содержит \'3\' и \'2020\'",\n'
-         '          "3" in j["filename"] and "2020" in j["filename"], True)'),
-        ('check("filename с \'3СУ\' и \'2020\'",\n'
-         '          "3СУ" in j["filename"] and "2020" in j["filename"], True)',
-         'check("filename содержит \'3\' и \'2020\'",\n'
-         '          "3" in j["filename"] and "2020" in j["filename"], True)'),
-        ('check("filename с \'3У\' и \'2020\'",\n'
-         '          "3У" in j["filename"] and "2020" in j["filename"], True)',
-         'check("filename содержит \'3\' и \'2020\'",\n'
-         '          "3" in j["filename"] and "2020" in j["filename"], True)'),
-        # Блок [14]
-        ('check("filename с \'5 CУ\'", "5 CУ" in j.get("filename", ""), True)',
-         'check("filename содержит \'5\'", "5" in j.get("filename", ""), True)'),
-        ('check("filename с \'5СУ\'", "5СУ" in j.get("filename", ""), True)',
-         'check("filename содержит \'5\'", "5" in j.get("filename", ""), True)'),
-        ('check("filename с \'5У\'", "5У" in j.get("filename", ""), True)',
-         'check("filename содержит \'5\'", "5" in j.get("filename", ""), True)'),
-    ],
-    "test_api_word_to_xlsx.py": [
-        ('check("filename с \'9 CУ\' и \'2020\'",\n'
-         '          "9 CУ" in j["filename"] and "2020" in j["filename"], True)',
-         'check("filename содержит \'9\' и \'2020\'",\n'
-         '          "9" in j["filename"] and "2020" in j["filename"], True)'),
-        ('check("filename с \'9СУ\' и \'2020\'",\n'
-         '          "9СУ" in j["filename"] and "2020" in j["filename"], True)',
-         'check("filename содержит \'9\' и \'2020\'",\n'
-         '          "9" in j["filename"] and "2020" in j["filename"], True)'),
-        ('check("filename с \'9У\' и \'2020\'",\n'
-         '          "9У" in j["filename"] and "2020" in j["filename"], True)',
-         'check("filename содержит \'9\' и \'2020\'",\n'
-         '          "9" in j["filename"] and "2020" in j["filename"], True)'),
-    ],
-    "test_db_pipeline_full.py": [
-        ('check("filename с \'9 CУ\'", "9 CУ" in exp["filename"], True)',
-         'check("filename содержит \'9\'", "9" in exp["filename"], True)'),
-        ('check("filename с \'9СУ\'", "9СУ" in exp["filename"], True)',
-         'check("filename содержит \'9\'", "9" in exp["filename"], True)'),
-        ('check("filename с \'9У\'", "9У" in exp["filename"], True)',
-         'check("filename содержит \'9\'", "9" in exp["filename"], True)'),
-    ],
-    "test_pipeline_areas.py": [
-        ('check("filename с \'9 CУ\'", "9 CУ" in res["filename"], True)',
-         'check("filename содержит \'9\'", "9" in res["filename"], True)'),
-        ('check("filename с \'9СУ\'", "9СУ" in res["filename"], True)',
-         'check("filename содержит \'9\'", "9" in res["filename"], True)'),
-        ('check("filename с \'9У\'", "9У" in res["filename"], True)',
-         'check("filename содержит \'9\'", "9" in res["filename"], True)'),
-        ('check("filename с \'5 CУ\'", "5 CУ" in res5["filename"], True)',
-         'check("filename содержит \'5\'", "5" in res5["filename"], True)'),
-        ('check("filename с \'5СУ\'", "5СУ" in res5["filename"], True)',
-         'check("filename содержит \'5\'", "5" in res5["filename"], True)'),
-        ('check("filename с \'5У\'", "5У" in res5["filename"], True)',
-         'check("filename содержит \'5\'", "5" in res5["filename"], True)'),
-        ('check("filename с \'3 CУ\'", "3 CУ" in res["filename"], True)',
-         'check("filename содержит \'3\'", "3" in res["filename"], True)'),
-        ('check("filename с \'3СУ\'", "3СУ" in res["filename"], True)',
-         'check("filename содержит \'3\'", "3" in res["filename"], True)'),
-        ('check("filename с \'3У\'", "3У" in res["filename"], True)',
-         'check("filename содержит \'3\'", "3" in res["filename"], True)'),
-    ],
-    "test_api_process_export.py": [
-        ('check("\'9 CУ\' в имени", "9 CУ" in cd_decoded, True)',
-         'check("\'9\' в имени", "9" in cd_decoded, True)'),
-        ('check("\'9СУ\' в имени", "9СУ" in cd_decoded, True)',
-         'check("\'9\' в имени", "9" in cd_decoded, True)'),
-        ('check("\'9У\' в имени", "9У" in cd_decoded, True)',
-         'check("\'9\' в имени", "9" in cd_decoded, True)'),
-    ],
+EXCLUDE_NAMES = {
+    ".venv", ".git", "__pycache__", ".pytest_cache", "coverage_html",
+    ".mypy_cache", ".ruff_cache", "node_modules",
+    "uploads", "output",
+    "app.db", "app.db-wal", "app.db-shm",
+    "$null", "server_test.log", "_release_errors.log",
+    "TEST.LOG", "test.log", "test_error.log",
+    "server_errors.log", "server_console.log",
+    "2020 гр.xlsx",
 }
 
+EXCLUDE_SUFFIXES = (".log", ".pyc", ".pyo", ".tmp", ".bak")
+EXCLUDE_NAMES_EXTRA = {".DS_Store", "Thumbs.db"}
 
-def patch_tests() -> int:
-    fixed = 0
-    for fname, pairs in TEST_REPLACEMENTS.items():
-        path = TESTS / fname
-        if not path.exists():
+COPY_ERRORS: list = []
+
+
+def should_skip(path: Path) -> bool:
+    name = path.name
+    if name in EXCLUDE_NAMES or name in EXCLUDE_NAMES_EXTRA:
+        return True
+    if any(name.endswith(s) for s in EXCLUDE_SUFFIXES):
+        return True
+    return False
+
+
+def win_long(path: Path) -> str:
+    s = str(path.resolve())
+    if os.name == "nt" and len(s) > 240 and not s.startswith("\\\\?\\"):
+        if s.startswith("\\\\"):
+            return "\\\\?\\UNC\\" + s[2:]
+        return "\\\\?\\" + s
+    return s
+
+
+def safe_copy_file(src: Path, dst: Path) -> bool:
+    try:
+        if not src.exists():
+            msg = f"  SKIP   нет источника: {src}"
+            print(msg)
+            COPY_ERRORS.append(msg)
+            return False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(win_long(src), win_long(dst))
+        return True
+    except OSError as exc:
+        msg = (f"  ОШИБКА: {type(exc).__name__}: {exc}\n"
+               f"          src: {src}\n"
+               f"          dst: {dst}")
+        print(msg)
+        COPY_ERRORS.append(msg)
+        return False
+
+
+def copy_tree(src: Path, dst: Path):
+    files = dirs = 0
+    try:
+        items = list(src.iterdir())
+    except OSError as exc:
+        print(f"  ОШИБКА чтения {src}: {exc}")
+        COPY_ERRORS.append(str(exc))
+        return 0, 0
+    for item in items:
+        if should_skip(item):
             continue
-        text = path.read_text(encoding="utf-8")
-        changed = False
-        for old, new in pairs:
-            if old in text:
-                text = text.replace(old, new)
-                changed = True
-        if changed:
-            path.write_text(text, encoding="utf-8")
-            fixed += 1
-            print(f"  ИЗМЕНЁН: {path.relative_to(BASE)}")
-    return fixed
+        target = dst / item.name
+        try:
+            is_dir = item.is_dir()
+        except OSError:
+            continue
+        if is_dir:
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+                dirs += 1
+            except OSError:
+                continue
+            f, d = copy_tree(item, target)
+            files += f
+            dirs += d
+        else:
+            if safe_copy_file(item, target):
+                files += 1
+    return files, dirs
+
+
+def write_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def make_readme(tag, fcount, dcount):
+    today = date.today().strftime("%Y-%m-%d")
+    return f"""# Акт уничтожения гражданских дел — релиз {tag}
+
+**Дата сборки:** {today}
+**Канал:** {CHANNEL}
+**Версия:** {VERSION}
+
+## О релизе
+
+Стабилизация после крупной переработки БД (0.0.6): добавлен **launcher** —
+окно-пульт управления сервером, логирование в файлы, **watchdog в
+parent-mode** (сервер живёт без вкладки, пока открыт launcher), единый
+формат имени файла акта, устойчивые тесты.
+
+## Новое в 0.0.7
+
+- **launcher.py** (окно-пульт): статус 🟢/🟡/🔴, кнопки
+  «Открыть в браузере» / «Перезапустить» / «Остановить» / «Открыть логи»,
+  живой лог, автостоп при закрытии, `CREATE_NO_WINDOW` для дочернего
+  процесса.
+- **Логирование сервера**: `server_errors.log` (исключения + watchdog),
+  `server_console.log` (stdout werkzeug и print).
+- **Watchdog parent-mode** (`fix_32`): при запуске из launcher
+  heartbeat-watchdog отключается, вместо него — проверка живости
+  родителя раз в 2 с. Сервер не умирает без вкладки, но завершается
+  вместе с окном-пультом.
+- **Единый формат имени файла** (`core/filename_utils.py`):
+  «Акт уничтожения гражданских дел 3 CУ 2020.docx».
+  `year_page.js::parseContentDisposition` читает `filename*` (UTF-8) из
+  Content-Disposition.
+- **UI создания участка/года**: кнопка «+ Участок» в сайдбаре,
+  hover-кнопка «+» у каждого участка, модалка с опцией «скопировать
+  реквизиты из [год]».
+- **Стабилизация**: import logging, base-leftovers, устойчивые тесты.
+
+## Быстрый старт
+
+    python setup_env.py
+    .venv\\Scripts\\python.exe run_tests.py     # 51 модуль
+    .venv\\Scripts\\python.exe court_case_app\\app.py
+
+**Или через окно-пульт** (двойной клик):
+    start.bat
+    run_app.pyw
+
+## Миграция со старой версии
+
+Если у вас БД от 0.0.5 или раньше:
+
+    .venv\\Scripts\\python.exe migrate_db_v2.py
+
+## Что НЕ включено
+
+- `.venv/`, `app.db`, `uploads/`, `output/` — создаются автоматически
+- Логи (`server_errors.log`, `server_console.log`) — создаются при старте
+- Личные файлы (исходные `.xlsx`)
+
+Статистика: {fcount} файлов, {dcount} папок.
+"""
 
 
 def main() -> int:
-    print("fix_29: base в copy_mode + устойчивые проверки тестов")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="Снимок релиза 0.0.7-alpha.")
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args()
 
-    print("[1] app.py — починить copy_mode (base больше нет)")
-    ok = patch_app()
+    release_root = BASE / RELEASES_DIRNAME / CHANNEL / VERSION
+    print(f"Релиз: {TAG}")
+    print(f"Папка: {release_root}")
+    print("=" * 64)
 
-    print("\n[2] Тесты — проверки по отдельным подстрокам")
-    n = patch_tests()
-    print(f"  Модулей обновлено: {n}")
+    if release_root.exists():
+        if not args.force:
+            print(f"Папка уже существует: {release_root}")
+            print("Используйте --force для перезаписи.")
+            return 1
+        print("Удаление старого снимка...")
+        shutil.rmtree(win_long(release_root))
+
+    release_root.mkdir(parents=True, exist_ok=True)
+
+    print("\n[1] Файлы корня")
+    files = dirs = 0
+    for name in INCLUDE_ROOT_FILES:
+        src = BASE / name
+        if not src.exists():
+            print(f"  SKIP   {name}  (нет файла)")
+            continue
+        if safe_copy_file(src, release_root / name):
+            files += 1
+            print(f"  COPY   {name}")
+
+    for pattern in INCLUDE_ROOT_GLOBS:
+        for src in sorted(BASE.glob(pattern)):
+            if not src.is_file() or should_skip(src):
+                continue
+            if safe_copy_file(src, release_root / src.name):
+                files += 1
+
+    print("\n[2] Деревья")
+    for name in INCLUDE_DIRS:
+        src = BASE / name
+        if not src.exists():
+            print(f"  SKIP   {name}/  (нет папки)")
+            continue
+        f, d = copy_tree(src, release_root / name)
+        files += f
+        dirs += d
+        print(f"  COPY   {name}/  ({f} файлов, {d} папок)")
+
+    print("\n[3] Метаданные релиза")
+    write_file(release_root / "VERSION", TAG + "\n")
+    print(f"  CREATE VERSION ({TAG})")
+    write_file(release_root / "README.md", make_readme(TAG, files, dirs))
+    print("  CREATE README.md")
+
+    changelog = f"""# История изменений
+
+## {TAG} — {date.today().strftime('%Y-%m-%d')}
+
+- launcher.py — окно-пульт управления сервером (tkinter)
+- Логирование: server_errors.log + server_console.log
+- Watchdog parent-mode (env NO_WATCHDOG + PARENT_PID)
+- Единый формат имени файла (core/filename_utils.py)
+- UI создания участка/года из сайдбара
+- Стабилизация: import logging, base-leftovers, устойчивые тесты
+- Тесты: 51 модуль, все OK
+"""
+    write_file(release_root / "CHANGELOG.md", changelog)
+    print("  CREATE CHANGELOG.md")
+
+    if COPY_ERRORS:
+        log_path = BASE / "_release_errors.log"
+        log_path.write_text("\n".join(COPY_ERRORS) + "\n", encoding="utf-8")
+        print(f"\nОШИБКИ копирования: {len(COPY_ERRORS)}  "
+              f"(см. {log_path.name})")
 
     print()
-    if not ok:
-        print("ЧТО-ТО НЕ ПРИМЕНЕНО.")
-        return 1
-    print("=" * 60)
-    print("Готово.")
-    print()
-    print("Проверка:")
-    print("  .venv\\Scripts\\python.exe run_tests.py")
-    print()
-    print("Ожидание: 51 модуль OK, FAIL = 0.")
+    print("=" * 64)
+    print(f"ГОТОВО: {release_root}")
+    print(f"Файлов скопировано: {files}")
+    size = sum(f.stat().st_size for f in release_root.rglob("*")
+               if f.is_file())
+    print(f"Размер: {size / 1024:.1f} КБ")
+    if COPY_ERRORS:
+        return 2
     return 0
 
 

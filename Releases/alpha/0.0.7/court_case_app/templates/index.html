@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Акт уничтожения гражданских дел — обработка</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar.css') }}">
+</head>
+<body>
+
+    {% include "_sidebar.html" %}
+    <header class="header">
+        <div class="header-inner">
+            <h1>Акт уничтожения гражданских дел</h1>
+            <nav class="nav">
+                <a class="nav-link active" href="/">Обработка</a>
+                <a class="nav-link" href="/check_page">Проверка категорий</a>
+                <a class="nav-link" href="/db_page">База данных</a>
+                <a class="nav-link" href="/convert_page">Конвертация</a>
+                <a class="nav-link" href="/inventory_page">Внутренняя опись</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="card" id="upload-card">
+            <h2>1. Исходная таблица</h2>
+            <div class="drop-zone" id="drop-zone">
+                <p class="drop-hint">Перетащите Excel-файл сюда или нажмите для выбора</p>
+                <input type="file" id="file-input" accept=".xlsx,.xlsm">
+            </div>
+            <p class="file-info" id="file-info"></p>
+            <label class="field">
+                Строка с заголовками (пусто = автоопределение, 0 = нет)
+                <input type="number" id="header-row" value="" min="0" max="100"
+                       placeholder="авто">
+            </label>
+            <div class="preview-block hidden" id="preview-block">
+                <h3>Предпросмотр исходного файла</h3>
+                <p class="hint" id="preview-info"></p>
+                <div class="table-wrap">
+                    <table class="preview" id="preview-source"></table>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>2. Параметры обработки</h2>
+            <div class="form-row">
+                <label class="field">
+                    Год дел
+                    <input type="number" id="year" placeholder="2023" min="1990" max="2100">
+                </label>
+                <label class="field">
+                    Судебный участок
+                    <select id="court-area">
+                        <option value="">Не выбран — использовать настройки</option>
+                    </select>
+                </label>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="alimony">
+                    Добавить алиментные дела
+                </label>
+            </div>
+
+            <div class="form-row">
+                <span class="field-label">Формат результата:</span>
+                <label class="radio-row"><input type="radio" name="format" value="excel" checked> Excel (.xlsx)</label>
+                <label class="radio-row"><input type="radio" name="format" value="word"> Word (.docx по шаблону)</label>
+            </div>
+
+            <div class="form-row" id="columns-row">
+                <span class="field-label">Столбцы Excel-результата:</span>
+                <div class="checkbox-grid">
+                    {% for key, title in columns %}
+                    <label class="checkbox-row small">
+                        <input type="checkbox" class="col-check" value="{{ key }}" checked> {{ title }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <button class="btn btn-primary" id="process-btn">Обработать</button>
+            <p class="error" id="error-box"></p>
+        </section>
+
+        <section class="card hidden" id="result-card">
+            <h2>3. Результат</h2>
+            <pre class="stats" id="stats-box"></pre>
+            <div class="actions">
+                <a class="btn btn-success hidden" id="download-link" href="#">Скачать файл</a>
+            </div>
+            <div class="table-wrap">
+                <table class="preview" id="preview-table">
+                    <thead>
+                        <tr>
+                            <th>№ п/п</th>
+                            <th>Заголовок дела</th>
+                            <th>Даты дела</th>
+                            <th>№ описи</th>
+                            <th>№ ед.хр.</th>
+                            <th>Кол-во</th>
+                            <th>Срок хранения</th>
+                            <th>Примечание</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>Программа подготовки акта о выделении к уничтожению документов (гражданские дела)</p>
+    </footer>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/db_tree.js') }}"></script>
+</body>
+</html>

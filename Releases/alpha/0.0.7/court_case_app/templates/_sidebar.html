@@ -1,0 +1,30 @@
+{# Сайдбар с деревом «участок → год» и созданием. #}
+<aside class="sidebar" id="db-sidebar">
+    <div class="sidebar-header">
+        <span class="sidebar-title">База дел</span>
+        <button class="sidebar-toggle" id="sidebar-toggle"
+                title="Свернуть / развернуть">&#9776;</button>
+    </div>
+    <div class="sidebar-body" id="db-tree">
+        <p class="sidebar-hint" id="sidebar-status">Загрузка…</p>
+    </div>
+    <div class="sidebar-footer">
+        <button class="sidebar-action sidebar-action-btn" id="sidebar-add-area">
+            + Участок
+        </button>
+        <a href="/db_page" class="sidebar-action">Все справочники →</a>
+    </div>
+</aside>
+
+{# Модальное окно создания участка / года #}
+<div class="modal hidden" id="sidebar-modal">
+    <div class="modal-content modal-sm">
+        <h3 id="sidebar-modal-title">Создание</h3>
+        <div id="sidebar-modal-body"></div>
+        <p class="error" id="sidebar-modal-error"></p>
+        <div class="actions">
+            <button class="btn btn-primary" id="sidebar-modal-ok">Создать</button>
+            <button class="btn btn-secondary" id="sidebar-modal-cancel">Отмена</button>
+        </div>
+    </div>
+</div>
