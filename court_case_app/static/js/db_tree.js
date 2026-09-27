@@ -1,9 +1,12 @@
-// Сайдбар с деревом «участок → год» и созданием (D6a + D6f).
+// Сайдбар с деревом «участок → год → тип дел → раздел» (D6a + D6f + D7b).
 //
 // Загружает /api/db_tree, рендерит дерево, обрабатывает клики:
 //   - клик по участку     — раскрыть/свернуть;
 //   - клик по «+» участка — создать год в нём;
-//   - клик по году        — переход на /db/year/<id>;
+//   - клик по году        — обзорная страница /db/year/<id>;
+//   - клик по «Реквизиты» — /db/year/<id>/refs;
+//   - клик по типу дел    — раскрыть/свернуть ветвь;
+//   - клик по разделу     — /db/year/<id>/<civil|admin>/<section>;
 //   - кнопка «+ Участок»  — создать участок;
 //   - кнопка ≡            — свернуть сайдбар (localStorage).
 
@@ -12,6 +15,16 @@
 
     var STORAGE_KEY = "sidebar_collapsed";
     var ACTIVE_KEY = "sidebar_active_year";
+    var OPEN_KEY = "sidebar_open_nodes";
+
+    var TYPE_TITLES = { civil: "Гражданские дела", admin: "Административные дела" };
+    var SECTIONS = [
+        { key: "files", title: "Файлы" },
+        { key: "cases", title: "Дела" },
+        { key: "inventory", title: "Опись" },
+        { key: "process", title: "Обработка" },
+        { key: "result", title: "Результат" }
+    ];
 
     function escapeHtml(s) {
         var d = document.createElement("div");
@@ -20,6 +33,34 @@
     }
 
     function el(id) { return document.getElementById(id); }
+
+    // =============================================================
+    // Состояние раскрытия узлов (localStorage)
+    // =============================================================
+
+    function loadOpenSet() {
+        try {
+            var raw = localStorage.getItem(OPEN_KEY);
+            return raw ? JSON.parse(raw) : {};
+        } catch (e) { return {}; }
+    }
+
+    function saveOpenSet(obj) {
+        try { localStorage.setItem(OPEN_KEY, JSON.stringify(obj)); }
+        catch (e) { /* ignore */ }
+    }
+
+    var OPEN = loadOpenSet();
+
+    function isOpen(key, def) {
+        if (Object.prototype.hasOwnProperty.call(OPEN, key)) return !!OPEN[key];
+        return !!def;
+    }
+
+    function setOpen(key, val) {
+        OPEN[key] = !!val;
+        saveOpenSet(OPEN);
+    }
 
     // =============================================================
     // Загрузка и рендер дерева
@@ -52,9 +93,9 @@
 
         var html = "";
         areas.forEach(function (a) {
-            var open = a.years_count > 0 ? " open" : "";
-            html += '<div class="tree-area' + open + '" data-area-id="' +
-                a.id + '">';
+            var areaOpen = isOpen("area:" + a.id, a.years_count > 0);
+            html += '<div class="tree-area' + (areaOpen ? " open" : "") +
+                '" data-area-id="' + a.id + '">';
             html += '<div class="tree-area-row" data-area-row="1">';
             html += '<span class="tree-arrow">&#9654;</span>';
             html += '<span class="tree-area-label">' +
@@ -68,36 +109,78 @@
             html += '</div>';
             html += '<div class="tree-years">';
             (a.years || []).forEach(function (y) {
-                var badges = "";
-                if (y.is_closed) {
-                    badges += '<span class="tree-year-badge">закрыт</span>';
-                }
-                if (y.is_incomplete) {
-                    badges += '<span class="tree-year-badge warn">⚠</span>';
-                }
-                if (y.result_is_stale) {
-                    badges += '<span class="tree-year-badge stale">устарел</span>';
-                }
-                html += '<div class="tree-year-row" data-year-id="' +
-                    y.id + '">';
-                html += '<span class="tree-year-label">' +
-                    escapeHtml(y.year) + '</span>';
-                html += '<span class="tree-year-badge">' +
-                    y.cases_count + ' дел</span>';
-                html += badges;
-                html += '</div>';
+                html += renderYearNode(y);
             });
             html += '</div></div>';
         });
         body.innerHTML = html;
 
+        bindTreeEvents(body, areas);
+        highlightActive();
+    }
+
+    function renderYearNode(y) {
+        var badges = "";
+        if (y.is_closed) {
+            badges += '<span class="tree-year-badge">закрыт</span>';
+        }
+        if (y.is_incomplete) {
+            badges += '<span class="tree-year-badge warn">⚠</span>';
+        }
+        var yearOpen = isOpen("year:" + y.id, false);
+
+        var html = '<div class="tree-year' + (yearOpen ? " open" : "") +
+            '" data-year-id="' + y.id + '">';
+        html += '<div class="tree-year-row" data-year-row="1">';
+        html += '<span class="tree-arrow">&#9654;</span>';
+        html += '<span class="tree-year-label">' +
+            escapeHtml(y.year) + '</span>';
+        html += badges;
+        html += '</div>';
+
+        html += '<div class="tree-year-children">';
+        // Реквизиты — уровень года
+        html += '<div class="tree-leaf" data-year-id="' + y.id +
+            '" data-section="refs">Реквизиты</div>';
+
+        // Ветви по типам дел (обе всегда)
+        ["civil", "admin"].forEach(function (ct) {
+            var t = (y.types && y.types[ct]) || {};
+            var typeOpen = isOpen("type:" + y.id + ":" + ct, false);
+            html += '<div class="tree-type' + (typeOpen ? " open" : "") +
+                '" data-year-id="' + y.id + '" data-case-type="' + ct + '">';
+            html += '<div class="tree-type-row" data-type-row="1">';
+            html += '<span class="tree-arrow">&#9654;</span>';
+            html += '<span class="tree-type-label">' +
+                escapeHtml(TYPE_TITLES[ct]) + '</span>';
+            html += '<span class="tree-type-count">' +
+                (t.cases_count || 0) + '</span>';
+            html += '</div>';
+            html += '<div class="tree-type-children">';
+            SECTIONS.forEach(function (s) {
+                var extra = "";
+                if (s.key === "result" && t.result_is_stale) {
+                    extra = '<span class="tree-year-badge stale">устарел</span>';
+                }
+                html += '<div class="tree-leaf" data-year-id="' + y.id +
+                    '" data-case-type="' + ct + '" data-section="' + s.key +
+                    '">' + escapeHtml(s.title) + extra + '</div>';
+            });
+            html += '</div></div>';
+        });
+
+        html += '</div></div>';
+        return html;
+    }
+
+    function bindTreeEvents(body, areas) {
         // Раскрытие/сворачивание участка
         body.querySelectorAll(".tree-area-row").forEach(function (row) {
             row.addEventListener("click", function (ev) {
-                // Клик по кнопке «+» — не сворачивать
                 if (ev.target.classList.contains("tree-area-add")) return;
                 var area = row.parentElement;
-                area.classList.toggle("open");
+                var open = area.classList.toggle("open");
+                setOpen("area:" + area.getAttribute("data-area-id"), open);
             });
         });
 
@@ -112,16 +195,53 @@
             });
         });
 
-        // Переход на год
+        // Клик по году — обзорная страница
         body.querySelectorAll(".tree-year-row").forEach(function (row) {
-            row.addEventListener("click", function () {
-                var yid = row.getAttribute("data-year-id");
-                try { localStorage.setItem(ACTIVE_KEY, yid); } catch (e) {}
-                window.location.href = "/db/year/" + yid;
+            row.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                var node = row.parentElement;
+                var yid = node.getAttribute("data-year-id");
+                var open = node.classList.toggle("open");
+                setOpen("year:" + yid, open);
+                goToYear(yid);
             });
         });
 
-        highlightActive();
+        // Раскрытие/сворачивание типа дел
+        body.querySelectorAll(".tree-type-row").forEach(function (row) {
+            row.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                var node = row.parentElement;
+                var open = node.classList.toggle("open");
+                setOpen("type:" + node.getAttribute("data-year-id") + ":" +
+                        node.getAttribute("data-case-type"), open);
+            });
+        });
+
+        // Клик по листу (раздел)
+        body.querySelectorAll(".tree-leaf").forEach(function (leaf) {
+            leaf.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                var yid = leaf.getAttribute("data-year-id");
+                var ct = leaf.getAttribute("data-case-type");
+                var section = leaf.getAttribute("data-section");
+                goToSection(yid, ct, section);
+            });
+        });
+    }
+
+    function goToYear(yid) {
+        try { localStorage.setItem(ACTIVE_KEY, yid); } catch (e) {}
+        window.location.href = "/db/year/" + yid;
+    }
+
+    function goToSection(yid, caseType, section) {
+        try { localStorage.setItem(ACTIVE_KEY, yid); } catch (e) {}
+        if (section === "refs") {
+            window.location.href = "/db/year/" + yid + "/refs";
+            return;
+        }
+        window.location.href = "/db/year/" + yid + "/" + caseType + "/" + section;
     }
 
     function highlightActive() {
@@ -130,13 +250,39 @@
         var m = window.location.pathname.match(/\/db\/year\/(\d+)/);
         if (m) activeId = m[1];
         if (!activeId) return;
-        document.querySelectorAll(".tree-year-row").forEach(function (el2) {
-            if (el2.getAttribute("data-year-id") === activeId) {
-                el2.classList.add("active");
-                var area = el2.closest(".tree-area");
+
+        // Активный год
+        document.querySelectorAll(".tree-year").forEach(function (node) {
+            if (node.getAttribute("data-year-id") === activeId) {
+                node.classList.add("active");
+                node.classList.add("open");
+                var area = node.closest(".tree-area");
                 if (area) area.classList.add("open");
             }
         });
+
+        // Активный раздел
+        var route = window.location.pathname.match(
+            /\/db\/year\/(\d+)\/([^/]+)\/([^/]+)/);
+        if (route) {
+            var yid = route[1], ct = route[2], section = route[3];
+            document.querySelectorAll(".tree-leaf").forEach(function (leaf) {
+                if (leaf.getAttribute("data-year-id") === yid &&
+                        leaf.getAttribute("data-case-type") === ct &&
+                        leaf.getAttribute("data-section") === section) {
+                    leaf.classList.add("active");
+                    var type = leaf.closest(".tree-type");
+                    if (type) type.classList.add("open");
+                }
+            });
+        } else if (/\/db\/year\/\d+\/refs/.test(window.location.pathname)) {
+            document.querySelectorAll('.tree-leaf[data-section="refs"]')
+                .forEach(function (leaf) {
+                    if (leaf.getAttribute("data-year-id") === activeId) {
+                        leaf.classList.add("active");
+                    }
+                });
+        }
     }
 
     // =============================================================
@@ -209,7 +355,7 @@
         }
 
         html += '<p class="hint">Реквизиты нового года можно будет ' +
-                'заполнить позже на странице года, таб «Реквизиты».</p>';
+                'заполнить позже на странице года, раздел «Реквизиты».</p>';
 
         openModal("Новый год — " + MODAL.areaLabel, html);
         setTimeout(function () {
@@ -294,7 +440,6 @@
                                     "Ошибка создания года");
                 }
                 var newYearId = res.data.id;
-                // Если нужно — скопировать реквизиты
                 if (copyFrom) {
                     return fetch("/api/court_areas/" + areaId +
                                  "/copy_refs", {
@@ -315,7 +460,6 @@
             .then(function (newYearId) {
                 closeModal();
                 loadTree();
-                // Переходим на созданный год
                 window.location.href = "/db/year/" + newYearId;
             })
             .catch(function (e) { showModalError(e.message); });

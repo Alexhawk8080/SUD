@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Smoke-тест таба «Файлы» на странице года (stage16d6c, D6c).
+Smoke-тест раздела «Файлы» на странице года (D7d).
 
 Запуск:
     .venv\\Scripts\\python.exe court_case_app\\tests\\test_ui_year_files.py
@@ -39,14 +39,15 @@ def main():
 
     client = app_module.app.test_client()
 
-    print("[1] Элементы таба «Файлы» в HTML")
-    r = client.get("/db/year/1")
+    print("[1] Элементы раздела «Файлы» в HTML")
+    r = client.get("/db/year/1/civil/files")
     check("HTTP 200", r.status_code, 200)
     html = r.get_data(as_text=True)
     check("drop-zone", 'id="files-drop-zone"' in html, True)
     check("file-input", 'id="files-file-input"' in html, True)
     check("kind", 'id="files-kind"' in html, True)
-    check("case-type", 'id="files-case-type"' in html, True)
+    check("нет селекта case-type (D7)",
+          'id="files-case-type"' in html, False)
     check("header-row", 'id="files-header-row"' in html, True)
     check("upload-btn", 'id="files-upload-btn"' in html, True)
     check("files-table", 'id="files-table"' in html, True)
@@ -55,7 +56,7 @@ def main():
     check("filter processed", 'name="files-filter" value="processed"' in html, True)
     check("files-empty", 'id="files-empty"' in html, True)
 
-    print("\n[2] Статика: JS содержит функции таба")
+    print("\n[2] Статика: JS содержит функции раздела")
     r = client.get("/static/js/year_page.js")
     check("200", r.status_code, 200)
     js = r.get_data(as_text=True)
@@ -67,6 +68,8 @@ def main():
     check("deleteFile", "function deleteFile" in js, True)
     check("блокировка по _yearClosed", "window._yearClosed" in js, True)
     check("reload tree после загрузки", "refreshDbTree" in js, True)
+    check("case_type из URL (currentCaseType)",
+          "currentCaseType" in js, True)
 
     print("\n[3] Статика: CSS таба «Файлы»")
     r = client.get("/static/css/year_page.css")

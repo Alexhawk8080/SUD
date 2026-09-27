@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Smoke-тест страницы года (stage16d6b, D6b).
+Smoke-тест страницы года (D7: обзорная сводка + разделы).
 
 Запуск:
     .venv\\Scripts\\python.exe court_case_app\\tests\\test_ui_year_page.py
@@ -48,12 +48,15 @@ def main():
     check("year_page.js подключён",
           "js/year_page.js" in html, True)
     check("YEAR_ID = 1", "window.YEAR_ID = 1" in html, True)
-    check("tabs есть", 'id="year-tabs"' in html, True)
-    check("панель refs", 'id="tab-refs"' in html, True)
-    check("панель files", 'id="tab-files"' in html, True)
-    check("панель cases", 'id="tab-cases"' in html, True)
-    check("панель process", 'id="tab-process"' in html, True)
-    check("панель result", 'id="tab-result"' in html, True)
+    check("обзорная сводка", 'id="view-overview"' in html, True)
+    check("раздел refs", 'id="view-refs"' in html, True)
+    check("раздел files", 'id="view-files"' in html, True)
+    check("раздел cases", 'id="view-cases"' in html, True)
+    check("раздел inventory", 'id="view-inventory"' in html, True)
+    check("раздел process", 'id="view-process"' in html, True)
+    check("раздел result", 'id="view-result"' in html, True)
+    check("сетка сводки", 'id="overview-grid"' in html, True)
+    check("хлебные крошки", 'id="year-breadcrumb"' in html, True)
     check("форма refs", 'id="refs-form"' in html, True)
     check("поле судья", 'id="ref-судья"' in html, True)
     check("поле секретарь", 'id="ref-секретарь"' in html, True)
@@ -64,21 +67,39 @@ def main():
     check("флаг closed", 'id="flag-closed"' in html, True)
     check("sidebar присутствует", 'id="db-sidebar"' in html, True)
 
+    print("\n[1b] Роуты разделов (D7)")
+    for url in ("/db/year/1/refs",
+                "/db/year/1/civil/files",
+                "/db/year/1/civil/cases",
+                "/db/year/1/civil/inventory",
+                "/db/year/1/civil/process",
+                "/db/year/1/civil/result",
+                "/db/year/1/admin/files"):
+        r = client.get(url)
+        check(f"GET {url} 200", r.status_code, 200)
+    check("неверный case_type -> 404",
+          client.get("/db/year/1/xxx/files").status_code, 404)
+    check("неверный section -> 404",
+          client.get("/db/year/1/civil/xxx").status_code, 404)
+
     print("\n[2] Статика")
     r = client.get("/static/css/year_page.css")
     check("year_page.css 200", r.status_code, 200)
     css = r.get_data(as_text=True)
-    check(".tabs в css", ".tabs" in css, True)
-    check(".tab.active", ".tab.active" in css, True)
+    check(".summary-grid в css", ".summary-grid" in css, True)
+    check(".breadcrumb в css", ".breadcrumb" in css, True)
     check(".year-header", ".year-header" in css, True)
 
     r = client.get("/static/js/year_page.js")
     check("year_page.js 200", r.status_code, 200)
     js = r.get_data(as_text=True)
-    check("initTabs", "function initTabs" in js, True)
+    check("parseRoute", "function parseRoute" in js, True)
+    check("renderRoute", "function renderRoute" in js, True)
+    check("loadOverview", "function loadOverview" in js, True)
     check("loadYear", "function loadYear" in js, True)
     check("saveRefs", "function saveRefs" in js, True)
     check("unlockYear", "function unlockYear" in js, True)
+    check("pushState", "pushState" in js, True)
 
     print("\n[3] Жизненный цикл года: создать + GET")
     r = client.post("/api/court_areas", json={"номер": "9"})

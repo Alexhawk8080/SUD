@@ -147,6 +147,56 @@
 .tree-year-badge.warn { color: #c62828; }
 .tree-year-badge.stale { color: #e65100; }
 
+/* D7b: подветки года — типы дел и разделы */
+.tree-year-row .tree-arrow { visibility: visible; }
+.tree-year-children {
+    display: none;
+    padding-left: 12px;
+}
+.tree-year.open .tree-year-children { display: block; }
+
+.tree-type { padding: 1px 0; }
+.tree-type-row {
+    display: flex;
+    align-items: center;
+    padding: 3px 12px;
+    cursor: pointer;
+    color: #3b4b57;
+    font-size: 12.5px;
+    font-weight: 600;
+    user-select: none;
+}
+.tree-type-row:hover { background: #f3f7fb; }
+.tree-type-label { flex: 1; margin-left: 4px; }
+.tree-type-count {
+    font-size: 11px;
+    color: #8a97a4;
+    font-weight: 400;
+    margin-left: 6px;
+}
+.tree-type-children {
+    display: none;
+    padding-left: 14px;
+}
+.tree-type.open .tree-type-children { display: block; }
+
+.tree-leaf {
+    padding: 3px 12px 3px 22px;
+    cursor: pointer;
+    color: #5b6b7a;
+    font-size: 12.5px;
+    border-left: 3px solid transparent;
+    user-select: none;
+}
+.tree-leaf:hover { background: #f3f7fb; }
+.tree-leaf.active {
+    background: #eaf2fa;
+    border-left-color: #1f4e79;
+    color: #1f4e79;
+    font-weight: 600;
+}
+.tree-leaf .tree-year-badge { margin-left: 6px; }
+
 /* Основной контент сдвигается, когда сайдбар развёрнут */
 body.has-sidebar .container,
 body.has-sidebar .header-inner {

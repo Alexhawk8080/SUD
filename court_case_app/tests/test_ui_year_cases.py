@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Smoke-тест таба «Дела» на странице года (stage16d6d, D6d).
+Smoke-тест раздела «Дела» на странице года (D7d).
 
 Запуск:
     .venv\\Scripts\\python.exe court_case_app\\tests\\test_ui_year_cases.py
@@ -39,14 +39,14 @@ def main():
 
     client = app_module.app.test_client()
 
-    print("[1] Элементы таба «Дела» в HTML")
-    r = client.get("/db/year/1")
+    print("[1] Элементы раздела «Дела» в HTML")
+    r = client.get("/db/year/1/civil/cases")
     check("HTTP 200", r.status_code, 200)
     html = r.get_data(as_text=True)
     check("селект cases-source",
           'id="cases-source"' in html, True)
-    check("селект cases-type",
-          'id="cases-type"' in html, True)
+    check("нет селекта cases-type (D7)",
+          'id="cases-type"' in html, False)
     check("чекбокс only-valid",
           'id="cases-only-valid"' in html, True)
     check("чекбокс only-problematic",

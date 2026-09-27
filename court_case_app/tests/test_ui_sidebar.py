@@ -51,18 +51,18 @@ def main():
         check(f"{url}: db_tree.js подключён",
               "js/db_tree.js" in html, True)
 
-    print("\n[2] Страница года-заглушки")
+    print("\n[2] Страница года")
     r = client.get("/db/year/1")
     check("HTTP 200", r.status_code, 200)
     html = r.get_data(as_text=True)
     check("sidebar присутствует", 'id="db-sidebar"' in html, True)
-    # D6b: year.html использует динамический заголовок через JS
+    # D7: year.html использует динамический заголовок через JS
     check("YEAR_ID = 1 в HTML",
           "window.YEAR_ID = 1" in html, True)
     check("элемент #year-title",
           'id="year-title"' in html, True)
-    check("табы года присутствуют",
-          'id="year-tabs"' in html, True)
+    check("обзорная сводка присутствует",
+          'id="view-overview"' in html, True)
     check("year.html подключён db_tree.js",
           "js/db_tree.js" in html, True)
 
@@ -79,6 +79,8 @@ def main():
     check("loadTree", "function loadTree" in js, True)
     check("renderTree", "function renderTree" in js, True)
     check("переход на /db/year/", "/db/year/" in js, True)
+    check("подветки типов дел (D7)", "tree-type" in js, True)
+    check("разделы-листья (D7)", "tree-leaf" in js, True)
 
     print("\n[4] /api/db_tree работает")
     r = client.get("/api/db_tree")

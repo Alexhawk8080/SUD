@@ -856,9 +856,75 @@ def convert_word_to_xlsx_route():
 # Страница года (stage16d6a, заглушка)
 # ---------------------------------------------------------------------------
 
+# D7: допустимые значения URL-схемы страницы года.
+YEAR_CASE_TYPES = ("civil", "admin")
+YEAR_SECTIONS = ("files", "cases", "inventory", "process", "result")
+
+
+def _year_type_summary(conn, year_id: int, case_type: str) -> dict:
+    """
+    D7: сводка по одному типу дел за год.
+
+    Файл считается относящимся к типу, если в нём есть хотя бы одно дело
+    этого типа (source_files не хранит case_type, тип определяется по cases).
+    """
+    files = db.list_source_files(conn, year_id)
+    type_files = []
+    cases = []
+    for f in files:
+        file_cases = db.list_cases(
+            conn, source_file_id=f["id"], case_type=case_type)
+        if file_cases:
+            type_files.append(f)
+            cases.extend(file_cases)
+
+    source_files = [f for f in type_files if f["file_kind"] == "source"]
+    processed_files = [f for f in type_files if f["file_kind"] == "processed"]
+
+    valid = sum(1 for c in cases if c["is_valid"])
+    problematic = sum(1 for c in cases if c["is_problematic"])
+    alimony = sum(1 for c in cases if c["is_alimony"])
+
+    proc = db.get_processing_result_by_pair(conn, year_id, case_type)
+    inventory = None
+    if proc:
+        inventory = db.get_inventory_by_result(conn, proc["id"])
+
+    return {
+        "case_type": case_type,
+        "files_count": len(type_files),
+        "source_files_count": len(source_files),
+        "processed_files_count": len(processed_files),
+        "cases_count": len(cases),
+        "valid_count": valid,
+        "problematic_count": problematic,
+        "alimony_count": alimony,
+        "result_id": proc["id"] if proc else None,
+        "result_processed_at": proc["processed_at"] if proc else None,
+        "result_record_count": proc["record_count"] if proc else 0,
+        "result_is_stale": bool(proc and proc["is_stale"]),
+        "inventory_id": inventory["id"] if inventory else None,
+    }
+
+
 @app.route("/db/year/<int:year_id>")
+@app.route("/db/year/<int:year_id>/refs")
 def db_year_page(year_id):
-    """Страница года. Пока заглушка; табы появятся в D6b–D6e."""
+    """D7: обзорная страница года / раздел «Реквизиты».
+
+    Единый шаблон year.html; конкретный раздел выбирает клиентский
+    роутинг (year_page.js) по window.location.pathname.
+    """
+    return render_template("year.html", year_id=year_id)
+
+
+@app.route("/db/year/<int:year_id>/<case_type>/<section>")
+def db_year_section_page(year_id, case_type, section):
+    """D7: раздел года внутри типа дел (files/cases/inventory/process/result)."""
+    if case_type not in YEAR_CASE_TYPES:
+        abort(404)
+    if section not in YEAR_SECTIONS:
+        abort(404)
     return render_template("year.html", year_id=year_id)
 
 
@@ -869,23 +935,28 @@ def db_year_page(year_id):
 @app.route("/api/db_tree")
 def api_db_tree():
     """
-    Дерево «судебный участок → год» со счётчиками для сайдбара.
+    Дерево «судебный участок → год» со счётчиками для сайдбара (D7).
+
+    Для каждого года добавлен блок "types" с разбивкой по типам дел
+    (civil/admin): файлы, дела, результат, опись. Поля верхнего уровня
+    (files_count/cases_count/result_id/result_is_stale) сохранены для
+    обратной совместимости и отражают суммарные значения по обоим типам.
 
     Возвращает:
         {
           "areas": [
             {
-              "id": 1,
-              "номер": "9",
-              "name": "...", "address": "...", "note": "...",
+              "id": 1, "номер": "9", "name": "...", ...,
               "years": [
                 {
                   "id": 1, "year": 2020,
                   "is_closed": false, "is_incomplete": false,
-                  "files_count": 2,        # source_files (все версии)
-                  "cases_count": 5,        # cases (все версии)
-                  "result_id": 7,          # processing_results.id или null
-                  "result_is_stale": false,
+                  "files_count": 2, "cases_count": 5,
+                  "result_id": 7, "result_is_stale": false,
+                  "types": {
+                    "civil": { ...сводка... },
+                    "admin": { ...сводка... },
+                  },
                 },
                 ...
               ],
@@ -904,25 +975,24 @@ def api_db_tree():
             years = db.list_court_years(conn, a["id"])
             years_info = []
             for y in years:
-                # Все версии файлов и дел по этому году
-                files = db.list_source_files(conn, y["id"])
-                cases = db.list_cases(conn)  # фильтр ниже
-                # Отфильтруем cases по годам: они привязаны к source_file_id
-                sf_ids = {f["id"] for f in files}
-                cases_in_year = [c for c in cases
-                                 if c["source_file_id"] in sf_ids]
-                # Результат (один на год+тип; для UI возьмём civil)
-                proc = db.get_processing_result_by_pair(
-                    conn, y["id"], "civil")
+                types = {
+                    ct: _year_type_summary(conn, y["id"], ct)
+                    for ct in YEAR_CASE_TYPES
+                }
+                files_count = sum(t["files_count"] for t in types.values())
+                cases_count = sum(t["cases_count"] for t in types.values())
+                # Для обратной совместимости: результат civil (как раньше)
+                civil = types["civil"]
                 years_info.append({
                     "id": y["id"],
                     "year": y["year"],
                     "is_closed": y["is_closed"],
                     "is_incomplete": y["is_incomplete"],
-                    "files_count": len(files),
-                    "cases_count": len(cases_in_year),
-                    "result_id": proc["id"] if proc else None,
-                    "result_is_stale": bool(proc and proc["is_stale"]),
+                    "files_count": files_count,
+                    "cases_count": cases_count,
+                    "result_id": civil["result_id"],
+                    "result_is_stale": civil["result_is_stale"],
+                    "types": types,
                 })
             result.append({
                 "id": a["id"],
@@ -934,6 +1004,31 @@ def api_db_tree():
                 "years_count": len(years_info),
             })
         return jsonify({"areas": result, "total_areas": len(result)})
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_years/<int:year_id>/summary")
+def api_year_summary(year_id):
+    """
+    D7: обзорная сводка года — реквизиты + счётчики по типам дел.
+
+    Возвращает:
+        {
+          "year": {...реквизиты court_years...},
+          "types": {"civil": {...}, "admin": {...}},
+        }
+    """
+    conn = get_db()
+    try:
+        cy = db.get_court_year(conn, year_id)
+        if not cy:
+            return _json_error("Год не найден", 404)
+        types = {
+            ct: _year_type_summary(conn, year_id, ct)
+            for ct in YEAR_CASE_TYPES
+        }
+        return jsonify({"year": cy, "types": types})
     finally:
         conn.close()
 

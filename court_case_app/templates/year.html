@@ -32,20 +32,23 @@
                     <span class="year-flag closed hidden" id="flag-closed">🔒 закрыт</span>
                 </div>
             </div>
-
-            <nav class="tabs" id="year-tabs">
-                <button class="tab active" data-tab="refs">Реквизиты</button>
-                <button class="tab" data-tab="files">Файлы</button>
-                <button class="tab" data-tab="cases">Дела</button>
-                <button class="tab" data-tab="process">Обработка</button>
-                <button class="tab" data-tab="result">Результат</button>
-            </nav>
+            <nav class="breadcrumb" id="year-breadcrumb"></nav>
         </section>
 
-        <!-- Вкладка «Реквизиты» -->
-        <section class="card tab-panel" id="tab-refs">
+        <!-- Обзорная сводка года (D7a) -->
+        <section class="card year-view" id="view-overview">
+            <h2>Обзор года</h2>
+            <p class="hint">Сводка по гражданским и административным делам.
+                Нажмите «Открыть», чтобы перейти к разделу.</p>
+            <div class="summary-grid" id="overview-grid"></div>
+            <p class="error" id="overview-error"></p>
+        </section>
+
+        <!-- Раздел «Реквизиты» (D7c) -->
+        <section class="card year-view hidden" id="view-refs">
             <h2>Реквизиты года</h2>
             <p class="hint">Значения используются в Word-акте для этого года.
+                Общие для гражданских и административных дел.
                 Изменения сохраняются в БД.</p>
 
             <form id="refs-form">
@@ -102,9 +105,9 @@
             </form>
         </section>
 
-        <!-- Вкладка «Файлы» (D6c) -->
-        <section class="card tab-panel hidden" id="tab-files">
-            <h2>Файлы года</h2>
+        <!-- Раздел «Файлы» (D7d) -->
+        <section class="card year-view hidden" id="view-files">
+            <h2>Файлы</h2>
             <p class="hint">Исходные таблицы и обработанные результаты.
                 Версии сохраняются; актуальную можно переключать.
                 Все версии хранятся до удаления вручную.</p>
@@ -120,12 +123,6 @@
                     <select id="files-kind">
                         <option value="source">Исходный (source)</option>
                         <option value="processed">Обработанный (processed)</option>
-                    </select>
-                </label>
-                <label class="field">Тип дел
-                    <select id="files-case-type">
-                        <option value="civil">Гражданские</option>
-                        <option value="admin">Административные</option>
                     </select>
                 </label>
                 <label class="field">Строка заголовков (пусто = авто)
@@ -169,23 +166,17 @@
             <p class="hint" id="files-empty">Пока нет файлов.</p>
         </section>
 
-        <!-- Вкладка «Дела» (D6d) -->
-        <section class="card tab-panel hidden" id="tab-cases">
+        <!-- Раздел «Дела» (D7d) -->
+        <section class="card year-view hidden" id="view-cases">
             <h2>Дела</h2>
             <p class="hint">Разобранные дела из выбранного файла.
                 Отображаются все, включая исключаемые при обработке
-                (алиментные, с неверным номером) — с пометкой.</p>
+                (алиментные, с верным номером) — с пометкой.</p>
 
             <div class="form-row">
                 <label class="field">Файл
                     <select id="cases-source" style="min-width: 320px;">
                         <option value="">— выберите файл —</option>
-                    </select>
-                </label>
-                <label class="field">Тип дел
-                    <select id="cases-type">
-                        <option value="civil">Гражданские</option>
-                        <option value="admin">Административные</option>
                     </select>
                 </label>
                 <label class="checkbox-row">
@@ -227,8 +218,18 @@
             <p class="hint" id="cases-empty">Пока нет данных.</p>
         </section>
 
-        <!-- Вкладка «Обработка» (D6e) -->
-        <section class="card tab-panel hidden" id="tab-process">
+        <!-- Раздел «Опись» (D7e, заглушка) -->
+        <section class="card year-view hidden" id="view-inventory">
+            <h2>Опись</h2>
+            <p class="hint">Раздел «Опись» появится в следующих версиях
+                (план №2). Опись — отдельная сущность: создаётся,
+                редактируется или загружается пользователем независимо
+                от результата обработки.</p>
+            <p class="hint" id="inventory-stub-note"></p>
+        </section>
+
+        <!-- Раздел «Обработка» (D7d) -->
+        <section class="card year-view hidden" id="view-process">
             <h2>Обработка</h2>
             <p class="hint">Обработка разобранных дел за этот год.
                 Результат сохраняется в БД (перезаписывается при повторе).</p>
@@ -236,13 +237,7 @@
             <div class="form-row">
                 <label class="field">Источник
                     <select id="process-source" style="min-width: 320px;">
-                        <option value="">— выберите файл —</option>
-                    </select>
-                </label>
-                <label class="field">Тип дел
-                    <select id="process-type">
-                        <option value="civil">Гражданские</option>
-                        <option value="admin">Административные</option>
+                        <option value="">— актуальный source —</option>
                     </select>
                 </label>
                 <label class="checkbox-row">
@@ -266,20 +261,14 @@
             <p class="hint" id="process-ok"></p>
         </section>
 
-        <!-- Вкладка «Результат» (D6e) -->
-        <section class="card tab-panel hidden" id="tab-result">
+        <!-- Раздел «Результат» (D7d) -->
+        <section class="card year-view hidden" id="view-result">
             <h2>Результат</h2>
             <p class="hint">Сохранённый результат обработки за этот год.
                 Один на пару «год + тип дел». Обновляется при повторной
                 обработке.</p>
 
             <div class="form-row">
-                <label class="field">Тип дел
-                    <select id="result-type">
-                        <option value="civil">Гражданские</option>
-                        <option value="admin">Административные</option>
-                    </select>
-                </label>
                 <button class="btn btn-secondary" id="result-reload">
                     Обновить
                 </button>

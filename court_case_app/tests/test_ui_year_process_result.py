@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Smoke-тест табов «Обработка» и «Результат» (stage16d6e, D6e).
+Smoke-тест разделов «Обработка» и «Результат» (D7d).
 
 Запуск:
     .venv\\Scripts\\python.exe court_case_app\\tests\\test_ui_year_process_result.py
@@ -39,20 +39,22 @@ def main():
 
     client = app_module.app.test_client()
 
-    print("[1] Элементы таба «Обработка»")
-    r = client.get("/db/year/1")
+    print("[1] Элементы раздела «Обработка»")
+    r = client.get("/db/year/1/civil/process")
     check("HTTP 200", r.status_code, 200)
     html = r.get_data(as_text=True)
     check("process-source", 'id="process-source"' in html, True)
-    check("process-type", 'id="process-type"' in html, True)
+    check("нет селекта process-type (D7)",
+          'id="process-type"' in html, False)
     check("process-alimony", 'id="process-alimony"' in html, True)
     check("process-autofix", 'id="process-autofix"' in html, True)
     check("process-btn", 'id="process-btn"' in html, True)
     check("process-error", 'id="process-error"' in html, True)
     check("process-ok", 'id="process-ok"' in html, True)
 
-    print("\n[2] Элементы таба «Результат»")
-    check("result-type", 'id="result-type"' in html, True)
+    print("\n[2] Элементы раздела «Результат»")
+    check("нет селекта result-type (D7)",
+          'id="result-type"' in html, False)
     check("result-reload", 'id="result-reload"' in html, True)
     check("result-dl-word", 'id="result-dl-word"' in html, True)
     check("result-dl-excel", 'id="result-dl-excel"' in html, True)

@@ -1,11 +1,30 @@
-// Страница года: табы + реквизиты + файлы + дела + обработка + результат.
-// Собранный файл (D6b + D6c + D6d + D6e). Полная перезапись.
+// Страница года (D7): клиентский роутинг по URL + разделы.
+//
+// URL-схема:
+//   /db/year/<id>                          — обзорная сводка
+//   /db/year/<id>/refs                     — реквизиты (уровень года)
+//   /db/year/<id>/<civil|admin>/files      — файлы типа
+//   /db/year/<id>/<civil|admin>/cases      — дела типа
+//   /db/year/<id>/<civil|admin>/inventory  — опись (заглушка)
+//   /db/year/<id>/<civil|admin>/process    — обработка типа
+//   /db/year/<id>/<civil|admin>/result     — результат типа
+//
+// Переходы внутри страницы — history.pushState + fetch, без перезагрузки.
+// Прямые ссылки работают: при загрузке раздел выбирается по pathname.
 
 (function () {
     "use strict";
 
     var YEAR_ID = window.YEAR_ID;
     console.log("[year_page] init, year=" + YEAR_ID);
+
+    var CASE_TYPES = ["civil", "admin"];
+    var SECTIONS = ["files", "cases", "inventory", "process", "result"];
+    var TYPE_TITLES = { civil: "Гражданские дела", admin: "Административные дела" };
+    var SECTION_TITLES = {
+        files: "Файлы", cases: "Дела", inventory: "Опись",
+        process: "Обработка", result: "Результат"
+    };
 
     // =================================================================
     // Общие помощники
@@ -19,47 +38,186 @@
         return d.innerHTML;
     }
 
-    // =================================================================
-    // Табы
-    // =================================================================
-
-    function initTabs() {
-        var tabs = document.querySelectorAll("#year-tabs .tab");
-        if (!tabs.length) return;
-        tabs.forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                var tab = btn.getAttribute("data-tab");
-                tabs.forEach(function (b) {
-                    b.classList.toggle("active", b === btn);
-                });
-                document.querySelectorAll(".tab-panel").forEach(function (p) {
-                    p.classList.add("hidden");
-                });
-                var target = el("tab-" + tab);
-                if (target) target.classList.remove("hidden");
-                try {
-                    localStorage.setItem("year_active_tab_" + YEAR_ID, tab);
-                } catch (e) { /* ignore */ }
-
-                if (tab === "cases") loadSourcesIntoSelect();
-                if (tab === "process") loadSourcesIntoProcess();
-                if (tab === "result") loadResult();
-            });
-        });
-        // Восстановить активный таб
-        var saved = null;
-        try {
-            saved = localStorage.getItem("year_active_tab_" + YEAR_ID);
-        } catch (e) { /* ignore */ }
-        if (saved) {
-            var btn = document.querySelector(
-                '#year-tabs .tab[data-tab="' + saved + '"]');
-            if (btn) btn.click();
-        }
+    function showError(id, msg) {
+        var e = el(id);
+        if (e) e.textContent = msg || "";
     }
 
     // =================================================================
-    // Таб «Реквизиты»
+    // Роутинг
+    // =================================================================
+
+    // Разбирает pathname в {view, caseType, section}.
+    //   view: 'overview' | 'refs' | 'section'
+    function parseRoute(pathname) {
+        var m = String(pathname || "").match(
+            /\/db\/year\/(\d+)(?:\/([^/]+))?(?:\/([^/]+))?/);
+        if (!m) return { view: "overview", caseType: null, section: null };
+        var seg1 = m[2] || "";
+        var seg2 = m[3] || "";
+        if (!seg1) return { view: "overview", caseType: null, section: null };
+        if (seg1 === "refs") {
+            return { view: "refs", caseType: null, section: null };
+        }
+        if (CASE_TYPES.indexOf(seg1) !== -1 &&
+                SECTIONS.indexOf(seg2) !== -1) {
+            return { view: "section", caseType: seg1, section: seg2 };
+        }
+        return { view: "overview", caseType: null, section: null };
+    }
+
+    function routeUrl(caseType, section) {
+        if (!caseType) return "/db/year/" + YEAR_ID;
+        return "/db/year/" + YEAR_ID + "/" + caseType + "/" + section;
+    }
+
+    function navigate(caseType, section, push) {
+        var url = routeUrl(caseType, section);
+        if (push !== false) {
+            try { history.pushState({}, "", url); } catch (e) { /* ignore */ }
+        }
+        renderRoute(parseRoute(url));
+    }
+
+    function renderRoute(route) {
+        // Тип дел фиксируется из URL для разделов
+        if (route.view === "section") currentCaseType = route.caseType;
+
+        // Скрыть все представления
+        document.querySelectorAll(".year-view").forEach(function (v) {
+            v.classList.add("hidden");
+        });
+
+        var viewId = "view-overview";
+        if (route.view === "refs") viewId = "view-refs";
+        else if (route.view === "section") viewId = "view-" + route.section;
+
+        var target = el(viewId);
+        if (target) target.classList.remove("hidden");
+
+        renderBreadcrumb(route);
+
+        // Загрузка данных для активного раздела
+        if (route.view === "overview") loadOverview();
+        else if (route.view === "refs") loadYear();
+        else if (route.view === "section") {
+            if (route.section === "files") loadFiles();
+            else if (route.section === "cases") loadSourcesIntoSelect();
+            else if (route.section === "inventory") renderInventoryStub(route.caseType);
+            else if (route.section === "process") loadSourcesIntoProcess();
+            else if (route.section === "result") loadResult();
+        }
+    }
+
+    function renderBreadcrumb(route) {
+        var box = el("year-breadcrumb");
+        if (!box) return;
+        var year = (window._yearData && window._yearData.year) || "";
+        var parts = [];
+        parts.push('<a href="/db/year/' + YEAR_ID +
+            '" data-nav="overview">Год ' + escapeHtml(year) + '</a>');
+        if (route.view === "refs") {
+            parts.push('<span class="sep">›</span><span>Реквизиты</span>');
+        } else if (route.view === "section") {
+            parts.push('<span class="sep">›</span><span>' +
+                escapeHtml(TYPE_TITLES[route.caseType] || route.caseType) +
+                '</span>');
+            parts.push('<span class="sep">›</span><span>' +
+                escapeHtml(SECTION_TITLES[route.section] || route.section) +
+                '</span>');
+        }
+        box.innerHTML = parts.join(" ");
+
+        box.querySelectorAll("a[data-nav]").forEach(function (a) {
+            a.addEventListener("click", function (ev) {
+                ev.preventDefault();
+                navigate(null, null);
+            });
+        });
+    }
+
+    // =================================================================
+    // Обзорная сводка (D7a)
+    // =================================================================
+
+    function loadOverview() {
+        showError("overview-error", "");
+        fetch("/api/court_years/" + YEAR_ID + "/summary", { cache: "no-store" })
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .then(renderOverview)
+            .catch(function (err) {
+                showError("overview-error",
+                    "Не удалось загрузить сводку: " + err.message);
+            });
+    }
+
+    function renderOverview(data) {
+        window._yearData = data.year;
+        applyYearHeader(data.year);
+
+        var grid = el("overview-grid");
+        if (!grid) return;
+        grid.innerHTML = "";
+
+        CASE_TYPES.forEach(function (ct) {
+            var t = (data.types && data.types[ct]) || {};
+            var block = document.createElement("div");
+            block.className = "summary-block";
+
+            var h = document.createElement("h3");
+            h.textContent = TYPE_TITLES[ct];
+            block.appendChild(h);
+
+            var lines = [
+                "Файлов: " + (t.files_count || 0) +
+                    " (исходных: " + (t.source_files_count || 0) +
+                    ", обработанных: " + (t.processed_files_count || 0) + ")",
+                "Дел: " + (t.cases_count || 0) +
+                    " (валидных: " + (t.valid_count || 0) +
+                    ", проблемных: " + (t.problematic_count || 0) +
+                    ", алиментных: " + (t.alimony_count || 0) + ")",
+                "Результат: " + (t.result_id
+                    ? (t.result_processed_at || "есть") +
+                      (t.result_is_stale ? " ⚠ устарел" : "")
+                    : "—"),
+                "Опись: " + (t.inventory_id ? "есть" : "—")
+            ];
+            var ul = document.createElement("ul");
+            ul.className = "summary-list";
+            lines.forEach(function (line) {
+                var li = document.createElement("li");
+                li.textContent = line;
+                ul.appendChild(li);
+            });
+            block.appendChild(ul);
+
+            var btn = document.createElement("button");
+            btn.className = "btn btn-primary";
+            btn.textContent = "Открыть";
+            btn.addEventListener("click", function () {
+                navigate(ct, "files");
+            });
+            block.appendChild(btn);
+
+            grid.appendChild(block);
+        });
+    }
+
+    function applyYearHeader(y) {
+        if (!y) return;
+        var title = el("year-title");
+        if (title) title.textContent = "Год " + y.year;
+        var fi = el("flag-incomplete");
+        if (fi) fi.classList.toggle("hidden", !y.is_incomplete);
+        var fc = el("flag-closed");
+        if (fc) fc.classList.toggle("hidden", !y.is_closed);
+    }
+
+    // =================================================================
+    // Раздел «Реквизиты» (D7c)
     // =================================================================
 
     var REF_FIELDS = [
@@ -70,12 +228,12 @@
     ];
 
     function showRefsError(msg) {
-        var e = el("refs-error"); if (e) e.textContent = msg || "";
-        var ok = el("refs-ok");   if (ok) ok.textContent = "";
+        showError("refs-error", msg);
+        var ok = el("refs-ok"); if (ok) ok.textContent = "";
     }
     function showRefsOk(msg) {
-        var ok = el("refs-ok");   if (ok) ok.textContent = msg || "";
-        var e = el("refs-error"); if (e) e.textContent = "";
+        var ok = el("refs-ok"); if (ok) ok.textContent = msg || "";
+        showError("refs-error", "");
     }
 
     function loadYear() {
@@ -92,16 +250,14 @@
 
     function renderYear(y) {
         window._yearData = y;
-        var title = el("year-title");
-        if (title) title.textContent = "Год " + y.year;
-        el("flag-incomplete").classList.toggle("hidden", !y.is_incomplete);
-        el("flag-closed").classList.toggle("hidden", !y.is_closed);
+        applyYearHeader(y);
 
         REF_FIELDS.forEach(function (f) {
             var inp = el("ref-" + f);
             if (inp) inp.value = y[f] || "";
         });
-        el("ref-is_closed").checked = !!y.is_closed;
+        var closed = el("ref-is_closed");
+        if (closed) closed.checked = !!y.is_closed;
         applyClosedState(y.is_closed);
     }
 
@@ -115,11 +271,9 @@
         var unlockBtn = el("refs-unlock");
         if (unlockBtn) unlockBtn.classList.toggle("hidden", !isClosed);
 
-        // Файлы: загрузка/переключение/удаление запрещены
         var upBtn = el("files-upload-btn"); if (upBtn) upBtn.disabled = !!isClosed;
-        var kind  = el("files-kind");       if (kind)  kind.disabled = !!isClosed;
-        var ct    = el("files-case-type");  if (ct)    ct.disabled = !!isClosed;
-        var hr    = el("files-header-row"); if (hr)    hr.disabled = !!isClosed;
+        var kind = el("files-kind"); if (kind) kind.disabled = !!isClosed;
+        var hr = el("files-header-row"); if (hr) hr.disabled = !!isClosed;
 
         window._yearClosed = !!isClosed;
         if (typeof loadFiles === "function") loadFiles();
@@ -195,19 +349,20 @@
     }
 
     // =================================================================
-    // Таб «Файлы»
+    // Раздел «Файлы» (D7d)
     // =================================================================
 
     var FILES = [];
     var filesKind = null;
+    var currentCaseType = "civil";
 
     function showFilesError(msg) {
-        var e = el("files-error"); if (e) e.textContent = msg || "";
-        var ok = el("files-ok");   if (ok) ok.textContent = "";
+        showError("files-error", msg);
+        var ok = el("files-ok"); if (ok) ok.textContent = "";
     }
     function showFilesOk(msg) {
-        var ok = el("files-ok");   if (ok) ok.textContent = msg || "";
-        var e = el("files-error"); if (e) e.textContent = "";
+        var ok = el("files-ok"); if (ok) ok.textContent = msg || "";
+        showError("files-error", "");
     }
 
     function initFilesTab() {
@@ -216,7 +371,6 @@
         if (!drop || !input) return;
 
         drop.addEventListener("click", function () {
-            // Пинг живучести перед открытием нативного диалога
             fetch("/api/ping", { method: "POST", cache: "no-store" })
                 .catch(function () {});
             input.click();
@@ -350,12 +504,11 @@
         if (!filesKind) { showFilesError("Выберите файл."); return; }
 
         var kind = el("files-kind").value;
-        var ct = el("files-case-type").value;
         var hrRaw = el("files-header-row").value.trim();
         var form = new FormData();
         form.append("file", filesKind);
         form.append("file_kind", kind);
-        form.append("case_type", ct);
+        form.append("case_type", currentCaseType);
         if (hrRaw !== "") form.append("header_row", hrRaw);
 
         var btn = el("files-upload-btn");
@@ -429,14 +582,14 @@
     }
 
     // =================================================================
-    // Таб «Дела»
+    // Раздел «Дела» (D7d)
     // =================================================================
 
     var CASES = [];
     var casesSourceId = null;
 
     function showCasesError(msg) {
-        var e = el("cases-error"); if (e) e.textContent = msg || "";
+        showError("cases-error", msg);
     }
 
     function initCasesTab() {
@@ -446,7 +599,6 @@
             casesSourceId = sel.value ? parseInt(sel.value, 10) : null;
             loadCases();
         });
-        el("cases-type").addEventListener("change", loadCases);
         ["cases-only-valid", "cases-only-problematic", "cases-only-alimony"]
             .forEach(function (id) {
                 var ch = el(id);
@@ -497,9 +649,8 @@
     function loadCases() {
         showCasesError("");
         if (!casesSourceId) { CASES = []; renderCases(); return; }
-        var ct = el("cases-type").value;
-        fetch("/api/source_files/" + casesSourceId + "/cases?case_type=" + ct,
-              { cache: "no-store" })
+        fetch("/api/source_files/" + casesSourceId + "/cases?case_type=" +
+              currentCaseType, { cache: "no-store" })
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
                 return r.json();
@@ -577,16 +728,29 @@
     }
 
     // =================================================================
-    // Таб «Обработка»
+    // Раздел «Опись» (D7e, заглушка)
+    // =================================================================
+
+    function renderInventoryStub(caseType) {
+        var note = el("inventory-stub-note");
+        if (note) {
+            note.textContent = "Тип дел: " +
+                (TYPE_TITLES[caseType] || caseType) +
+                ". Раздел пока не реализован.";
+        }
+    }
+
+    // =================================================================
+    // Раздел «Обработка» (D7d)
     // =================================================================
 
     function showProcessError(msg) {
-        var e = el("process-error"); if (e) e.textContent = msg || "";
-        var ok = el("process-ok");   if (ok) ok.textContent = "";
+        showError("process-error", msg);
+        var ok = el("process-ok"); if (ok) ok.textContent = "";
     }
     function showProcessOk(msg) {
-        var ok = el("process-ok");   if (ok) ok.textContent = msg || "";
-        var e = el("process-error"); if (e) e.textContent = "";
+        var ok = el("process-ok"); if (ok) ok.textContent = msg || "";
+        showError("process-error", "");
     }
 
     function initProcessTab() {
@@ -627,7 +791,7 @@
         var sourceId = (sel && sel.value) ? parseInt(sel.value, 10) : null;
 
         var body = {
-            case_type: el("process-type").value,
+            case_type: currentCaseType,
             process_alimony: el("process-alimony").checked,
             auto_fix: el("process-autofix").checked,
             source_file_id: sourceId
@@ -666,20 +830,18 @@
     }
 
     // =================================================================
-    // Таб «Результат»
+    // Раздел «Результат» (D7d)
     // =================================================================
 
     var CURRENT_RESULT = null;
 
     function showResultError(msg) {
-        var e = el("result-error"); if (e) e.textContent = msg || "";
+        showError("result-error", msg);
     }
 
     function initResultTab() {
         var rl = el("result-reload");
         if (rl) rl.addEventListener("click", loadResult);
-        var sel = el("result-type");
-        if (sel) sel.addEventListener("change", loadResult);
         var dlW = el("result-dl-word");
         if (dlW) dlW.addEventListener("click", function () {
             exportResult("word");
@@ -694,13 +856,12 @@
 
     function loadResult() {
         showResultError("");
-        var ct = el("result-type") ? el("result-type").value : "civil";
         fetch("/api/court_years/" + YEAR_ID + "/results",
               { cache: "no-store" })
             .then(function (r) { return r.json(); })
             .then(function (list) {
                 var found = (list || []).find(function (x) {
-                    return x.case_type === ct;
+                    return x.case_type === currentCaseType;
                 });
                 if (!found) {
                     CURRENT_RESULT = null;
@@ -767,22 +928,18 @@
     //   2) если нет — filename="<ascii-fallback>" (может содержать _)
     function parseContentDisposition(cd) {
         if (!cd) return "";
-        // 1) filename* с указанием кодировки (RFC 5987/6266)
         var mStar = cd.match(/filename\*\s*=\s*([^;]+)/i);
         if (mStar) {
             var raw = mStar[1].trim();
-            // Формат: UTF-8''<percent-encoded>  (иногда с кавычками)
             var m2 = raw.match(/^([\w-]+)'([\w-]*)'(.*)$/);
             var enc = m2 ? m2[3] : raw;
             enc = enc.replace(/^["']|["']$/g, "");
             try {
                 return decodeURIComponent(enc);
             } catch (e) {
-                // если сломанный percent-encoding — вернём как есть
                 return enc;
             }
         }
-        // 2) filename= (ASCII)
         var mAscii = cd.match(/filename\s*=\s*["]?([^";]+)["]?/i);
         if (mAscii) {
             return mAscii[1].trim();
@@ -846,7 +1003,6 @@
 
     function init() {
         try {
-            initTabs();
             var form = el("refs-form");
             if (form) form.addEventListener("submit", saveRefs);
             var unlock = el("refs-unlock");
@@ -855,7 +1011,16 @@
             initCasesTab();
             initProcessTab();
             initResultTab();
-            loadYear();
+
+            // Кнопки «назад/вперёд» браузера
+            window.addEventListener("popstate", function () {
+                renderRoute(parseRoute(window.location.pathname));
+            });
+
+            // Первичный рендер по текущему URL
+            var route = parseRoute(window.location.pathname);
+            if (route.view === "section") currentCaseType = route.caseType;
+            renderRoute(route);
         } catch (e) {
             console.error("[year_page] init failed:", e);
         }
