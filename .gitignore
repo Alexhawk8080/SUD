@@ -73,3 +73,6 @@ court_case_app/tests/fixtures/
 /stage*.py
 /fix_*.py
 /release_*.py
+
+# --- Служебные скрипты разработки (fix_*, stage_*, release_*) ---
+/_dev/
