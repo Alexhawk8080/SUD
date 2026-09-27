@@ -9,6 +9,9 @@ API для управления БД, скачивание результата,
 """
 
 import json
+import logging
+import sys
+from logging.handlers import RotatingFileHandler
 import os
 import re
 import threading
@@ -42,6 +45,86 @@ from core.inventory.api import register_routes as register_inventory_routes
 from database import db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ---------------------------------------------------------------------------
+# fix_27: логирование в файлы
+# ---------------------------------------------------------------------------
+_SERVER_LOG = os.path.join(BASE_DIR, "server_errors.log")
+
+_logger = logging.getLogger("court_case_app")
+_logger.setLevel(logging.DEBUG)
+if not _logger.handlers:
+    _handler = RotatingFileHandler(
+        _SERVER_LOG, maxBytes=2 * 1024 * 1024, backupCount=3,
+        encoding="utf-8")
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    _logger.addHandler(_handler)
+    _logger.propagate = False
+
+
+def _log_uncaught(exc_type, exc_value, exc_tb):
+    """sys.excepthook: пишем необработанные исключения в лог."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    _logger.critical("Uncaught exception",
+                     exc_info=(exc_type, exc_value, exc_tb))
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+def _log_thread_exception(args):
+    """threading.excepthook: пишем исключения фоновых потоков."""
+    _logger.critical(
+        "Uncaught exception in thread %s",
+        getattr(args, "thread", "?").name,
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+
+sys.excepthook = _log_uncaught
+if hasattr(threading, "excepthook"):
+    threading.excepthook = _log_thread_exception
+
+# Зеркалируем stdout/stderr в файл — чтобы HTTP-строки werkzeug и print()
+# из приложения тоже сохранялись.
+try:
+    _CONSOLE_LOG = os.path.join(BASE_DIR, "server_console.log")
+    _stream = open(_CONSOLE_LOG, "a", encoding="utf-8", buffering=1)
+
+    class _Tee:
+        def __init__(self, original, fileobj):
+            self._original = original
+            self._fileobj = fileobj
+
+        def write(self, data):
+            try:
+                self._original.write(data)
+            except Exception:
+                pass
+            try:
+                self._fileobj.write(data)
+                self._fileobj.flush()
+            except Exception:
+                pass
+            return len(data) if isinstance(data, str) else 0
+
+        def flush(self):
+            for obj in (self._original, self._fileobj):
+                try:
+                    obj.flush()
+                except Exception:
+                    pass
+
+        def fileno(self):
+            return self._original.fileno()
+
+        def isatty(self):
+            return False
+
+    sys.stdout = _Tee(sys.stdout, _stream)
+    sys.stderr = _Tee(sys.stderr, _stream)
+except Exception:
+    pass
 DB_PATH = os.path.join(BASE_DIR, "database", "app.db")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -65,6 +148,10 @@ def _beat_watchdog():
     while True:
         time.sleep(2.0)
         if time.time() - _last_beat > HEARTBEAT_TIMEOUT:
+            _logger.warning(
+                "Watchdog: heartbeat отсутствует %.1f c (порог %.1f) — "
+                "останавливаю сервер через os._exit(0)",
+                time.time() - _last_beat, HEARTBEAT_TIMEOUT)
             os._exit(0)
 
 
@@ -527,9 +614,10 @@ def convert_xlsx_to_word_route():
         }), 409
 
     if copy_mode and os.path.exists(out_path):
+        _base = filename[:-5] if filename.lower().endswith(".docx") else filename
         i = 1
         while True:
-            cand = f"{base} ({i}).docx"
+            cand = f"{_base} ({i}).docx"
             cand_path = os.path.join(OUTPUT_DIR, cand)
             if not os.path.exists(cand_path):
                 filename = cand
@@ -649,9 +737,10 @@ def convert_word_to_xlsx_route():
         }), 409
 
     if copy_mode and os.path.exists(out_path):
+        _base = filename[:-5] if filename.lower().endswith(".xlsx") else filename
         i = 1
         while True:
-            cand = f"{base} ({i}).xlsx"
+            cand = f"{_base} ({i}).xlsx"
             cand_path = os.path.join(OUTPUT_DIR, cand)
             if not os.path.exists(cand_path):
                 filename = cand
@@ -1597,6 +1686,11 @@ def api_settings_save():
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    _logger.info("Сервер стартует. app.py=%s", __file__)
+    _logger.info("DB_PATH=%s", DB_PATH)
+    _logger.info("Server log: %s", _SERVER_LOG)
+    _logger.info("Console log: %s",
+                 locals().get("_CONSOLE_LOG", "(no console log)"))
     # Инициализация БД при старте.
     # stage16a1c: если схема старая (v1) — просим запустить миграцию.
     try:

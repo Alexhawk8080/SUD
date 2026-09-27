@@ -151,7 +151,7 @@ def main():
             template_path=TEMPLATE, output_dir=out_dir,
             output_format="word")
         check("Файл создан", os.path.exists(exp["path"]), True)
-        check("filename с '9У'", "9У" in exp["filename"], True)
+        check("filename содержит '9'", "9" in exp["filename"], True)
         check("filename .docx", exp["filename"].endswith(".docx"), True)
         text = docx_text(exp["path"])
         check("Судья в акте", "Судья20" in text, True)

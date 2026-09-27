@@ -762,6 +762,34 @@
         });
     }
 
+    // Разбор Content-Disposition:
+    //   1) сначала filename*=UTF-8''<url-encoded>  (правильное имя)
+    //   2) если нет — filename="<ascii-fallback>" (может содержать _)
+    function parseContentDisposition(cd) {
+        if (!cd) return "";
+        // 1) filename* с указанием кодировки (RFC 5987/6266)
+        var mStar = cd.match(/filename\*\s*=\s*([^;]+)/i);
+        if (mStar) {
+            var raw = mStar[1].trim();
+            // Формат: UTF-8''<percent-encoded>  (иногда с кавычками)
+            var m2 = raw.match(/^([\w-]+)'([\w-]*)'(.*)$/);
+            var enc = m2 ? m2[3] : raw;
+            enc = enc.replace(/^["']|["']$/g, "");
+            try {
+                return decodeURIComponent(enc);
+            } catch (e) {
+                // если сломанный percent-encoding — вернём как есть
+                return enc;
+            }
+        }
+        // 2) filename= (ASCII)
+        var mAscii = cd.match(/filename\s*=\s*["]?([^";]+)["]?/i);
+        if (mAscii) {
+            return mAscii[1].trim();
+        }
+        return "";
+    }
+
     function exportResult(fmt) {
         if (!CURRENT_RESULT) return;
         showResultError("");
@@ -778,9 +806,8 @@
                     });
                 }
                 var cd = r.headers.get("Content-Disposition") || "";
-                var m = cd.match(/filename\*?=(?:UTF-8'')?["]?([^";]+)/i);
-                var fname = m ? decodeURIComponent(m[1])
-                              : ("акт." + (fmt === "word" ? "docx" : "xlsx"));
+                var fname = parseContentDisposition(cd) ||
+                            ("акт." + (fmt === "word" ? "docx" : "xlsx"));
                 return r.blob().then(function (b) {
                     var a = document.createElement("a");
                     a.href = URL.createObjectURL(b);

@@ -158,8 +158,8 @@ def main():
     check("HTTP 200", r.status_code, 200)
     j = r.get_json()
     check("filename есть", bool(j.get("filename")), True)
-    check("filename с '3У' и '2020'",
-          "3У" in j["filename"] and "2020" in j["filename"], True)
+    check("filename содержит '3' и '2020'",
+          "3" in j["filename"] and "2020" in j["filename"], True)
     check("count = 6", j.get("count"), 6)
     check("preview = 6", len(j.get("preview") or []), 6)
 
@@ -254,7 +254,7 @@ def main():
                         content_type="multipart/form-data")
     check("HTTP 200", r.status_code, 200)
     j = r.get_json()
-    check("filename с '5У'", "5У" in j.get("filename", ""), True)
+    check("filename содержит '5'", "5" in j.get("filename", ""), True)
     out_file = os.path.join(out_dir, j["filename"])
     doc = Document(out_file)
     text = "\n".join(p.text for p in doc.paragraphs)

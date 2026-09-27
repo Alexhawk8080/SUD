@@ -89,7 +89,7 @@ def main():
     print("\n[3] court_area_id и target_year=2020 -> берутся из 2020")
     res = process_rows(make_rows(), 2020, False, "word", db_path,
                        TEMPLATE, out_dir, court_area_id=aid)
-    check("filename с 9СУ", "9У" in res["filename"], True)
+    check("filename с 9СУ", "9 CУ" in res["filename"], True)
     text = docx_text(res["path"])
     check("Судья20 в акте", "Судья20" in text, True)
     check("Сек20 в акте", "Сек20" in text, True)

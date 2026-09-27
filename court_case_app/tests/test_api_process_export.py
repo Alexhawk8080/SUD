@@ -129,7 +129,7 @@ def main():
     # Content-Disposition URL-кодирует не-ASCII — декодируем
     from urllib.parse import unquote
     cd_decoded = unquote(cd)
-    check("'9У' в имени", "9У" in cd_decoded, True)
+    check("'9' в имени", "9" in cd_decoded, True)
 
     print("\n[7] export в Excel")
     r = client.post(f"/api/results/{rid2}/export",

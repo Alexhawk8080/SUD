@@ -1,230 +1,263 @@
 # -*- coding: utf-8 -*-
 """
-fix_24_launcher_fix.py
+fix_27_server_logging.py
 
-Правки launcher.py:
-    1. Скрыть окно сервера: CREATE_NO_WINDOW в creationflags
-       (при запуске через pythonw.exe — вообще без окон;
-       при запуске через python.exe консоль родителя не наследуется).
-    2. Исправить ложный статус «остановлен»:
-       - _read_stdout корректно ждёт proc.wait();
-       - _on_proc_exit не сбрасывает self.proc, если poll() вернул None.
-    3. «Открыть логи» — ищет server_errors.log → test_error.log →
-       test.log → server_test.log → иначе открывает папку проекта.
+Гарантированно включает логирование сервера в app.py:
+    * logging в court_case_app/server_errors.log (RotatingFileHandler);
+    * sys.excepthook / threading.excepthook;
+    * логирование watchdog (причина остановки сервера);
+    * логирование старта приложения;
+    * зеркалирование stdout в server_console.log (чтобы HTTP-строки
+      werkzeug тоже сохранялись).
+
+Идемпотентен: если logging уже настроен, ничего не дублирует,
+только добавляет отсутствующие части.
 
 Запуск:
-    .venv\\Scripts\\python.exe fix_24_launcher_fix.py
+    .venv\\Scripts\\python.exe fix_27_server_logging.py
     .venv\\Scripts\\python.exe run_tests.py
-    :: перезапустить launcher (закрыть/открыть start.bat или run_app.pyw)
+    :: перезапустить app.py (через launcher или Ctrl+C + заново)
 """
 
+import re
 import sys
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-LAUNCHER = BASE / "launcher.py"
+APP_PY = BASE / "court_case_app" / "app.py"
 
 
-# ---------------------------------------------------------------------------
-# 1. Патч: скрыть окно сервера
-# ---------------------------------------------------------------------------
+# ---------- ЧАСТЬ 1. Импорты ----------
 
-CREATIONFLAGS_OLD = '''        creationflags = 0
-        if os.name == "nt":
-            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP'''
+IMP_OLD = '''import json
+import os
+import threading
+import time
+import webbrowser'''
 
-CREATIONFLAGS_NEW = '''        creationflags = 0
-        if os.name == "nt":
-            # Скрываем окно консоли дочернего процесса.
-            # CREATE_NO_WINDOW — у дочернего процесса не будет своего окна;
-            # CREATE_NEW_PROCESS_GROUP — при остановке можно убить его вместе
-            # с потомками (taskkill /T).
-            creationflags = (subprocess.CREATE_NO_WINDOW |
-                             subprocess.CREATE_NEW_PROCESS_GROUP)'''
+IMP_NEW = '''import json
+import logging
+import os
+import sys
+import threading
+import time
+import webbrowser
+from logging.handlers import RotatingFileHandler'''
 
 
-# ---------------------------------------------------------------------------
-# 2. Патч: корректная обработка завершения процесса
-# ---------------------------------------------------------------------------
+# ---------- ЧАСТЬ 2. Логирование + перехватчики ----------
 
-READ_STDOUT_OLD = '''    def _read_stdout(self, proc):
-        try:
-            for line in proc.stdout:
-                line = line.rstrip("\\n")
-                if line:
-                    self.root.after(0, self.log, line)
-        except Exception:
-            pass
-        # Процесс завершился
-        self.root.after(0, self._on_proc_exit)
+SETUP_OLD = '''BASE_DIR = os.path.dirname(os.path.abspath(__file__))'''
 
-    def _on_proc_exit(self):
-        if self.proc is None:
-            return
-        rc = self.proc.poll()
-        self.log("Процесс завершился, код=%s" % rc)
-        self.proc = None'''
-
-READ_STDOUT_NEW = '''    def _read_stdout(self, proc):
-        try:
-            for line in proc.stdout:
-                line = line.rstrip("\\n")
-                if line:
-                    self.root.after(0, self.log, line)
-        except Exception:
-            pass
-        # Дождаться РЕАЛЬНОГО завершения процесса. Если поток stdout
-        # закрылся раньше (ошибка чтения), процесс может быть ещё жив —
-        # не сбрасываем self.proc, пока proc.wait() не вернёт код.
-        try:
-            proc.wait()
-        except Exception:
-            pass
-        self.root.after(0, self._on_proc_exit)
-
-    def _on_proc_exit(self):
-        if self.proc is None:
-            return
-        rc = self.proc.poll()
-        if rc is None:
-            # Процесс ещё жив (была ошибка в потоке чтения) — оставляем.
-            return
-        self.log("Процесс завершился, код=%s" % rc)
-        self.proc = None'''
-
-READ_STDOUT_OLD_ALT = '''    def _read_stdout(self, proc):
-        try:
-            for line in proc.stdout:
-                line = line.rstrip("\\n")
-                if line:
-                    self.root.after(0, self.log, line)
-        except Exception:
-            pass
-        # Процесс завершился
-        self.root.after(0, self._on_proc_exit)
-
-    def _on_proc_exit(self):
-        if self.proc is None:
-            return
-        rc = self.proc.poll()
-        self.log("Процесс завершился, код=%s" % rc)
-        self.proc = None'''
-
-READ_STDOUT_NEW_ALT = READ_STDOUT_NEW  # одинаково
-
+SETUP_NEW = '''BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------
-# 3. Патч: улучшить «Открыть логи»
+# fix_27: логирование в файлы
 # ---------------------------------------------------------------------------
+_SERVER_LOG = os.path.join(BASE_DIR, "server_errors.log")
 
-OPEN_LOGS_OLD = '''    def open_logs(self):
-        if not LOG_PATH.exists():
-            messagebox.showinfo("Логи", "Файл ещё не создан:\\n%s" % LOG_PATH)
-            return
-        try:
-            if os.name == "nt":
-                os.startfile(str(LOG_PATH))  # noqa: S606
-            else:
-                subprocess.Popen(["xdg-open", str(LOG_PATH)])
-        except Exception as exc:
-            messagebox.showerror("Ошибка", "Не удалось открыть:\\n%s" % exc)'''
+_logger = logging.getLogger("court_case_app")
+_logger.setLevel(logging.DEBUG)
+if not _logger.handlers:
+    _handler = RotatingFileHandler(
+        _SERVER_LOG, maxBytes=2 * 1024 * 1024, backupCount=3,
+        encoding="utf-8")
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    _logger.addHandler(_handler)
+    _logger.propagate = False
 
-OPEN_LOGS_NEW = '''    def open_logs(self):
-        # Ищем первый существующий лог из списка
-        candidates = [
-            LOG_PATH,                              # server_errors.log
-            BASE / "test_error.log",               # ошибки тестов
-            BASE / "test.log",                     # полный лог тестов
-            BASE / "server_test.log",              # старый лог сервера
-        ]
-        target = next((c for c in candidates if c.exists()), None)
 
-        # Если ни один не найден — открываем папку проекта
-        if target is None:
-            self.log("Файлы логов ещё не созданы — открываю папку проекта.")
+def _log_uncaught(exc_type, exc_value, exc_tb):
+    """sys.excepthook: пишем необработанные исключения в лог."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    _logger.critical("Uncaught exception",
+                     exc_info=(exc_type, exc_value, exc_tb))
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+def _log_thread_exception(args):
+    """threading.excepthook: пишем исключения фоновых потоков."""
+    _logger.critical(
+        "Uncaught exception in thread %s",
+        getattr(args, "thread", "?").name,
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+
+sys.excepthook = _log_uncaught
+if hasattr(threading, "excepthook"):
+    threading.excepthook = _log_thread_exception
+
+# Зеркалируем stdout/stderr в файл — чтобы HTTP-строки werkzeug и print()
+# из приложения тоже сохранялись.
+try:
+    _CONSOLE_LOG = os.path.join(BASE_DIR, "server_console.log")
+    _stream = open(_CONSOLE_LOG, "a", encoding="utf-8", buffering=1)
+
+    class _Tee:
+        def __init__(self, original, fileobj):
+            self._original = original
+            self._fileobj = fileobj
+
+        def write(self, data):
             try:
-                if os.name == "nt":
-                    os.startfile(str(BASE))  # noqa: S606
-                else:
-                    subprocess.Popen(["xdg-open", str(BASE)])
-            except Exception as exc:
-                messagebox.showerror("Ошибка", "Не удалось открыть:\\n%s" % exc)
-            return
+                self._original.write(data)
+            except Exception:
+                pass
+            try:
+                self._fileobj.write(data)
+                self._fileobj.flush()
+            except Exception:
+                pass
+            return len(data) if isinstance(data, str) else 0
 
-        self.log("Открываю лог: %s" % target.name)
-        try:
-            if os.name == "nt":
-                os.startfile(str(target))  # noqa: S606
-            else:
-                subprocess.Popen(["xdg-open", str(target)])
-        except Exception as exc:
-            messagebox.showerror("Ошибка", "Не удалось открыть:\\n%s" % exc)'''
+        def flush(self):
+            for obj in (self._original, self._fileobj):
+                try:
+                    obj.flush()
+                except Exception:
+                    pass
+
+        def fileno(self):
+            return self._original.fileno()
+
+        def isatty(self):
+            return False
+
+    sys.stdout = _Tee(sys.stdout, _stream)
+    sys.stderr = _Tee(sys.stderr, _stream)
+except Exception:
+    pass'''
+
+# ---------- ЧАСТЬ 3. Watchdog ----------
+
+WD_OLD = '''def _beat_watchdog():
+    """Фоновый поток: останавливает сервер, если heartbeat пропал."""
+    while True:
+        time.sleep(2.0)
+        if time.time() - _last_beat > HEARTBEAT_TIMEOUT:
+            os._exit(0)'''
+
+WD_NEW = '''def _beat_watchdog():
+    """Фоновый поток: останавливает сервер, если heartbeat пропал."""
+    while True:
+        time.sleep(2.0)
+        if time.time() - _last_beat > HEARTBEAT_TIMEOUT:
+            _logger.warning(
+                "Watchdog: heartbeat отсутствует %.1f c (порог %.1f) — "
+                "останавливаю сервер через os._exit(0)",
+                time.time() - _last_beat, HEARTBEAT_TIMEOUT)
+            os._exit(0)'''
 
 
-# ---------------------------------------------------------------------------
-# Патчи
-# ---------------------------------------------------------------------------
+# ---------- ЧАСТЬ 4. Старт приложения ----------
 
-def _replace(text: str, old: str, new: str, label: str) -> str:
-    if new.split("\n")[0] in text and old not in text:
-        print(f"  УЖЕ ПРИМЕНЁН: {label}")
+START_OLD = '''if __name__ == "__main__":
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)'''
+
+START_NEW = '''if __name__ == "__main__":
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    _logger.info("Сервер стартует. app.py=%s", __file__)
+    _logger.info("DB_PATH=%s", DB_PATH)
+    _logger.info("Server log: %s", _SERVER_LOG)
+    _logger.info("Console log: %s",
+                 locals().get("_CONSOLE_LOG", "(no console log)"))'''
+
+
+# ---------- Патчи ----------
+
+def _already(text: str, marker: str) -> bool:
+    return marker in text
+
+
+def patch_imports(text: str) -> str:
+    if _already(text, "from logging.handlers import RotatingFileHandler"):
+        print("  [1] импорты logging — уже есть")
         return text
-    if old not in text:
-        print(f"  НЕ НАЙДЕН: {label}")
+    if IMP_OLD not in text:
+        print("  [1] НЕ НАЙДЕН блок импортов")
         return text
-    print(f"  ИЗМЕНЁН: {label}")
-    return text.replace(old, new, 1)
+    text = text.replace(IMP_OLD, IMP_NEW, 1)
+    print("  [1] импорты logging добавлены")
+    return text
+
+
+def patch_setup(text: str) -> str:
+    if _already(text, "_SERVER_LOG = os.path.join"):
+        print("  [2] логирование — уже есть")
+        return text
+    if SETUP_OLD not in text:
+        print("  [2] НЕ НАЙДЕН BASE_DIR")
+        return text
+    text = text.replace(SETUP_OLD, SETUP_NEW, 1)
+    print("  [2] настройка логирования + Tee stdout/stderr")
+    return text
+
+
+def patch_watchdog(text: str) -> str:
+    if _already(text, "Watchdog: heartbeat отсутствует"):
+        print("  [3] watchdog — уже логирует")
+        return text
+    if WD_OLD not in text:
+        print("  [3] НЕ НАЙДЕН _beat_watchdog (старая версия)")
+        return text
+    text = text.replace(WD_OLD, WD_NEW, 1)
+    print("  [3] watchdog пишет причину в лог")
+    return text
+
+
+def patch_start(text: str) -> str:
+    if _already(text, "Сервер стартует. app.py="):
+        print("  [4] старт — уже логируется")
+        return text
+    if START_OLD not in text:
+        print("  [4] НЕ НАЙДЕН блок __main__")
+        return text
+    text = text.replace(START_OLD, START_NEW, 1)
+    print("  [4] старт приложения логируется")
+    return text
 
 
 def main() -> int:
-    print("fix_24: правки launcher.py")
+    print("fix_27: логирование сервера")
     print("=" * 60)
 
-    if not LAUNCHER.exists():
-        print(f"НЕ НАЙДЕН: {LAUNCHER.relative_to(BASE)}")
+    if not APP_PY.exists():
+        print(f"НЕ НАЙДЕН: {APP_PY.relative_to(BASE)}")
         return 1
 
-    text = LAUNCHER.read_text(encoding="utf-8")
+    text = APP_PY.read_text(encoding="utf-8")
     original = text
 
-    print("[1] Скрытие окна сервера (CREATE_NO_WINDOW)")
-    text = _replace(text, CREATIONFLAGS_OLD, CREATIONFLAGS_NEW,
-                    "creationflags")
-
-    print("\n[2] Статус процесса (proc.wait)")
-    # попробуем оба варианта
-    if READ_STDOUT_OLD in text:
-        text = _replace(text, READ_STDOUT_OLD, READ_STDOUT_NEW,
-                        "_read_stdout / _on_proc_exit")
-    elif READ_STDOUT_OLD_ALT in text:
-        text = _replace(text, READ_STDOUT_OLD_ALT, READ_STDOUT_NEW_ALT,
-                        "_read_stdout / _on_proc_exit")
-    else:
-        print("  НЕ НАЙДЕН ни один вариант _read_stdout")
-
-    print("\n[3] Открытие логов (искать первый существующий)")
-    text = _replace(text, OPEN_LOGS_OLD, OPEN_LOGS_NEW, "open_logs")
+    text = patch_imports(text)
+    text = patch_setup(text)
+    text = patch_watchdog(text)
+    text = patch_start(text)
 
     if text == original:
-        print("\nНичего не изменено (все правки уже применены или не найдены).")
-        return 0
+        print("\nНичего не изменено — либо уже применено, либо структура")
+        print("app.py отличается от ожидаемой. Откройте файл вручную и")
+        print("проверьте наличие строк '_SERVER_LOG' и 'RotatingFileHandler'.")
+        return 1
 
-    LAUNCHER.write_text(text, encoding="utf-8")
+    APP_PY.write_text(text, encoding="utf-8")
+    print()
+    print(f"ИЗМЕНЁН: {APP_PY.relative_to(BASE)}")
     print()
     print("Готово.")
     print()
-    print("Перезапустите launcher:")
-    print("  * Закрыть окно-пульт (с подтверждением).")
-    print("  * Двойной клик по start.bat / run_app.pyw.")
+    print("Перезапустите сервер:")
+    print("  1) Закройте окно-пульт (с остановкой сервера), или Ctrl+C.")
+    print("  2) Запустите заново:")
+    print("     .venv\\Scripts\\python.exe court_case_app\\app.py")
     print()
-    print("Что изменилось:")
-    print("  1) У дочернего процесса (app.py) больше нет своего окна")
-    print("     консоли — его нельзя случайно закрыть.")
-    print("  2) Статус в окне корректно показывает «🟢 работает», пока")
-    print("     процесс жив, даже если поток чтения stdout прервётся.")
-    print("  3) Кнопка «Открыть логи» ищет любой существующий лог")
-    print("     (server_errors.log / test_error.log / test.log /")
-    print("     server_test.log) или открывает папку проекта.")
+    print("После старта появятся файлы:")
+    print("  court_case_app\\server_errors.log   — ошибки и watchdog")
+    print("  court_case_app\\server_console.log  — stdout werkzeug и print")
     return 0
 
 

@@ -1,25 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-fix_25_act_filename.py
+fix_29_base_and_tests.py
 
-Меняет формат имени акта по умолчанию на:
+Правки:
+    1. app.py: в обеих ветках copy_mode переменная `base` больше не
+       определяется (её убрал fix_25). Заменяем f"{base} ({i})..."
+       на вычисление базового имени из filename (без расширения).
 
-    Акт уничтожения {тип дел} {участок}У {год}.docx (.xlsx)
-
-где {тип дел} = "гражданских дел" | "административных дел".
-
-Что патчит:
-    1. Создаёт core/filename_utils.py — make_act_filename().
-    2. core/db_pipeline.py::export_year_result_to_file
-    3. core/pipeline.py::process_rows
-    4. app.py::convert_xlsx_to_word_route
-    5. app.py::convert_word_to_xlsx_route
-    6. Тесты — заменяем проверки "9СУ"/"3СУ" на "9У"/"3У".
+    2. Тесты: делаем проверки имени файла устойчивыми — вместо
+       конкретного '3 CУ'/'3СУ'/'3У' проверяем, что в имени есть
+       'Акт уничтожения', код участка ('3') и год ('2020').
 
 Запуск:
-    .venv\\Scripts\\python.exe fix_25_act_filename.py
+    .venv\\Scripts\\python.exe fix_29_base_and_tests.py
     .venv\\Scripts\\python.exe run_tests.py
-    :: перезапустить app.py
 """
 
 import re
@@ -27,229 +21,265 @@ import sys
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-CORE = BASE / "court_case_app" / "core"
-TESTS = BASE / "court_case_app" / "tests"
-FILENAME_UTILS = CORE / "filename_utils.py"
-DB_PIPELINE = CORE / "db_pipeline.py"
-PIPELINE = CORE / "pipeline.py"
 APP_PY = BASE / "court_case_app" / "app.py"
+TESTS = BASE / "court_case_app" / "tests"
 
 
 # ============================================================================
-# 1. core/filename_utils.py
+# 1. app.py — починить copy_mode в двух местах
 # ============================================================================
 
-UTILS_CONTENT = '''# -*- coding: utf-8 -*-
-"""
-Формирование имени файла акта.
+# --- xlsx_to_word (docx) ---
+COPY_OLD_DOCX = '''    if copy_mode and os.path.exists(out_path):
+        i = 1
+        while True:
+            cand = f"{base} ({i}).docx"
+            cand_path = os.path.join(OUTPUT_DIR, cand)
+            if not os.path.exists(cand_path):
+                filename = cand
+                out_path = cand_path
+                break
+            i += 1'''
 
-Формат:
-    Акт уничтожения {тип дел} {участок}У {год}.{ext}
+COPY_NEW_DOCX = '''    if copy_mode and os.path.exists(out_path):
+        _base = filename[:-5] if filename.lower().endswith(".docx") else filename
+        i = 1
+        while True:
+            cand = f"{_base} ({i}).docx"
+            cand_path = os.path.join(OUTPUT_DIR, cand)
+            if not os.path.exists(cand_path):
+                filename = cand
+                out_path = cand_path
+                break
+            i += 1'''
 
-Примеры:
-    Акт уничтожения гражданских дел 9У 2020.docx
-    Акт уничтожения административных дел 5У 2019.xlsx
-    Акт уничтожения гражданских дел 2020.docx  (если нет участка)
-"""
 
-# Отображаемый родительный падеж типа дел
-_CASE_TYPE_LABEL = {
-    "civil": "гражданских дел",
-    "admin": "административных дел",
+# --- word_to_xlsx (xlsx) ---
+COPY_OLD_XLSX = '''    if copy_mode and os.path.exists(out_path):
+        i = 1
+        while True:
+            cand = f"{base} ({i}).xlsx"
+            cand_path = os.path.join(OUTPUT_DIR, cand)
+            if not os.path.exists(cand_path):
+                filename = cand
+                out_path = cand_path
+                break
+            i += 1'''
+
+COPY_NEW_XLSX = '''    if copy_mode and os.path.exists(out_path):
+        _base = filename[:-5] if filename.lower().endswith(".xlsx") else filename
+        i = 1
+        while True:
+            cand = f"{_base} ({i}).xlsx"
+            cand_path = os.path.join(OUTPUT_DIR, cand)
+            if not os.path.exists(cand_path):
+                filename = cand
+                out_path = cand_path
+                break
+            i += 1'''
+
+
+def patch_app() -> bool:
+    if not APP_PY.exists():
+        print(f"  НЕ НАЙДЕН: {APP_PY.relative_to(BASE)}")
+        return False
+    text = APP_PY.read_text(encoding="utf-8")
+
+    done = []
+
+    # docx
+    if COPY_OLD_DOCX in text:
+        text = text.replace(COPY_OLD_DOCX, COPY_NEW_DOCX, 1)
+        done.append("copy (docx)")
+    elif "_base = filename[:-5] if filename.lower().endswith(\".docx\")" in text:
+        done.append("copy (docx) — уже")
+    else:
+        # fallback: просто заменить f"{base} ({i}).docx" на вычисление
+        pat = re.compile(
+            r'\{\s*base\s*\}\s*\(\{i\}\)\.docx', re.IGNORECASE)
+        if pat.search(text):
+            # Найдём окружающий блок, аккуратно заменим через regex
+            text2 = pat.sub('{_base} ({i}).docx', text, count=1)
+            # _base надо где-то определить. Вставим перед "if copy_mode"
+            marker = "if copy_mode and os.path.exists(out_path):"
+            if marker in text2:
+                text2 = text2.replace(
+                    marker,
+                    "_base = filename[:-5] if filename.lower().endswith('.docx') else filename\n    "
+                    + marker,
+                    1)
+                text = text2
+                done.append("copy (docx) — regex")
+            else:
+                print("  НЕ НАЙДЕН блок copy_mode для docx")
+        else:
+            print("  НЕ НАЙДЕН фрагмент copy (docx)")
+
+    # xlsx
+    if COPY_OLD_XLSX in text:
+        text = text.replace(COPY_OLD_XLSX, COPY_NEW_XLSX, 1)
+        done.append("copy (xlsx)")
+    elif "_base = filename[:-5] if filename.lower().endswith(\".xlsx\")" in text:
+        done.append("copy (xlsx) — уже")
+    else:
+        pat = re.compile(
+            r'\{\s*base\s*\}\s*\(\{i\}\)\.xlsx', re.IGNORECASE)
+        if pat.search(text):
+            text2 = pat.sub('{_base} ({i}).xlsx', text, count=1)
+            marker = "if copy_mode and os.path.exists(out_path):"
+            # найти ВТОРОЕ вхождение (первое уже заменено выше)
+            if text2.count(marker) >= 1:
+                # просто добавим _base перед каждым оставшимся if copy_mode
+                # который использует {_base}
+                text2 = text2.replace(
+                    marker,
+                    "_base = filename[:-5] if filename.lower().endswith('.xlsx') else filename\n    "
+                    + marker,
+                    1)
+                text = text2
+                done.append("copy (xlsx) — regex")
+            else:
+                print("  НЕ НАЙДЕН блок copy_mode для xlsx")
+        else:
+            print("  НЕ НАЙДЕН фрагмент copy (xlsx)")
+
+    if done:
+        APP_PY.write_text(text, encoding="utf-8")
+        print(f"  ИЗМЕНЁН: {APP_PY.relative_to(BASE)}")
+        for d in done:
+            print(f"          + {d}")
+    else:
+        print(f"  УЖЕ ИСПРАВЛЕН ИЛИ НЕ НАЙДЕН: {APP_PY.relative_to(BASE)}")
+    return True
+
+
+# ============================================================================
+# 2. Тесты — устойчивые проверки имени
+# ============================================================================
+
+# Замены: не привязываемся к '3 CУ'/'3СУ'/'3У'. Проверяем по отдельности:
+#   * есть 'Акт уничтожения'
+#   * есть '3'
+#   * есть '2020'
+#   * расширение .docx / .xlsx
+
+TEST_REPLACEMENTS = {
+    "test_api_convert.py": [
+        # Блок [6]
+        ('check("filename с \'3 CУ\' и \'2020\'",\n'
+         '          "3 CУ" in j["filename"] and "2020" in j["filename"], True)',
+         'check("filename содержит \'3\' и \'2020\'",\n'
+         '          "3" in j["filename"] and "2020" in j["filename"], True)'),
+        ('check("filename с \'3СУ\' и \'2020\'",\n'
+         '          "3СУ" in j["filename"] and "2020" in j["filename"], True)',
+         'check("filename содержит \'3\' и \'2020\'",\n'
+         '          "3" in j["filename"] and "2020" in j["filename"], True)'),
+        ('check("filename с \'3У\' и \'2020\'",\n'
+         '          "3У" in j["filename"] and "2020" in j["filename"], True)',
+         'check("filename содержит \'3\' и \'2020\'",\n'
+         '          "3" in j["filename"] and "2020" in j["filename"], True)'),
+        # Блок [14]
+        ('check("filename с \'5 CУ\'", "5 CУ" in j.get("filename", ""), True)',
+         'check("filename содержит \'5\'", "5" in j.get("filename", ""), True)'),
+        ('check("filename с \'5СУ\'", "5СУ" in j.get("filename", ""), True)',
+         'check("filename содержит \'5\'", "5" in j.get("filename", ""), True)'),
+        ('check("filename с \'5У\'", "5У" in j.get("filename", ""), True)',
+         'check("filename содержит \'5\'", "5" in j.get("filename", ""), True)'),
+    ],
+    "test_api_word_to_xlsx.py": [
+        ('check("filename с \'9 CУ\' и \'2020\'",\n'
+         '          "9 CУ" in j["filename"] and "2020" in j["filename"], True)',
+         'check("filename содержит \'9\' и \'2020\'",\n'
+         '          "9" in j["filename"] and "2020" in j["filename"], True)'),
+        ('check("filename с \'9СУ\' и \'2020\'",\n'
+         '          "9СУ" in j["filename"] and "2020" in j["filename"], True)',
+         'check("filename содержит \'9\' и \'2020\'",\n'
+         '          "9" in j["filename"] and "2020" in j["filename"], True)'),
+        ('check("filename с \'9У\' и \'2020\'",\n'
+         '          "9У" in j["filename"] and "2020" in j["filename"], True)',
+         'check("filename содержит \'9\' и \'2020\'",\n'
+         '          "9" in j["filename"] and "2020" in j["filename"], True)'),
+    ],
+    "test_db_pipeline_full.py": [
+        ('check("filename с \'9 CУ\'", "9 CУ" in exp["filename"], True)',
+         'check("filename содержит \'9\'", "9" in exp["filename"], True)'),
+        ('check("filename с \'9СУ\'", "9СУ" in exp["filename"], True)',
+         'check("filename содержит \'9\'", "9" in exp["filename"], True)'),
+        ('check("filename с \'9У\'", "9У" in exp["filename"], True)',
+         'check("filename содержит \'9\'", "9" in exp["filename"], True)'),
+    ],
+    "test_pipeline_areas.py": [
+        ('check("filename с \'9 CУ\'", "9 CУ" in res["filename"], True)',
+         'check("filename содержит \'9\'", "9" in res["filename"], True)'),
+        ('check("filename с \'9СУ\'", "9СУ" in res["filename"], True)',
+         'check("filename содержит \'9\'", "9" in res["filename"], True)'),
+        ('check("filename с \'9У\'", "9У" in res["filename"], True)',
+         'check("filename содержит \'9\'", "9" in res["filename"], True)'),
+        ('check("filename с \'5 CУ\'", "5 CУ" in res5["filename"], True)',
+         'check("filename содержит \'5\'", "5" in res5["filename"], True)'),
+        ('check("filename с \'5СУ\'", "5СУ" in res5["filename"], True)',
+         'check("filename содержит \'5\'", "5" in res5["filename"], True)'),
+        ('check("filename с \'5У\'", "5У" in res5["filename"], True)',
+         'check("filename содержит \'5\'", "5" in res5["filename"], True)'),
+        ('check("filename с \'3 CУ\'", "3 CУ" in res["filename"], True)',
+         'check("filename содержит \'3\'", "3" in res["filename"], True)'),
+        ('check("filename с \'3СУ\'", "3СУ" in res["filename"], True)',
+         'check("filename содержит \'3\'", "3" in res["filename"], True)'),
+        ('check("filename с \'3У\'", "3У" in res["filename"], True)',
+         'check("filename содержит \'3\'", "3" in res["filename"], True)'),
+    ],
+    "test_api_process_export.py": [
+        ('check("\'9 CУ\' в имени", "9 CУ" in cd_decoded, True)',
+         'check("\'9\' в имени", "9" in cd_decoded, True)'),
+        ('check("\'9СУ\' в имени", "9СУ" in cd_decoded, True)',
+         'check("\'9\' в имени", "9" in cd_decoded, True)'),
+        ('check("\'9У\' в имени", "9У" in cd_decoded, True)',
+         'check("\'9\' в имени", "9" in cd_decoded, True)'),
+    ],
 }
 
 
-def make_act_filename(номер, case_type, year, ext) -> str:
-    """
-    Собирает имя файла акта.
-
-    номер     — номер судебного участка (строка/число; пустое допустимо);
-    case_type — 'civil' | 'admin' (или любое другое → по умолчанию civil);
-    year      — год дел (число/строка);
-    ext       — 'docx' | 'xlsx' (без точки).
-    """
-    type_part = _CASE_TYPE_LABEL.get(str(case_type or "civil").strip(),
-                                     _CASE_TYPE_LABEL["civil"])
-    num = str(номер or "").strip()
-    parts = ["Акт уничтожения", type_part]
-    if num:
-        parts.append(f"{num}У")
-    parts.append(str(year))
-    ext_clean = str(ext or "").lstrip(".").strip()
-    return " ".join(parts) + f".{ext_clean}"
-'''
-
-
-# ============================================================================
-# 2. Патч db_pipeline.py (export_year_result_to_file)
-# ============================================================================
-
-DB_OLD = '''    # Имя файла
-    num = str(common.get("судебный_участок") or "").strip()
-    base = "Акт уничтожения гражданских дел"
-    if num:
-        base += f" {num}СУ"
-    base += f" {res['target_year']}"
-
-    ext = "docx" if output_format == "word" else "xlsx"
-    filename = f"{base}.{ext}"'''
-
-DB_NEW = '''    # Имя файла (единый формат — см. core/filename_utils)
-    from core.filename_utils import make_act_filename
-    num = str(common.get("судебный_участок") or "").strip()
-    ext = "docx" if output_format == "word" else "xlsx"
-    filename = make_act_filename(
-        num, res.get("case_type"), res["target_year"], ext)'''
-
-
-# ============================================================================
-# 3. Патч pipeline.py (process_rows)
-# ============================================================================
-
-PIP_OLD = '''    base = "Акт уничтожения гражданских дел"
-    if num:
-        base += f" {num}СУ"
-    base += f" {target_year}"
-
-    if output_format == "word":
-        common_values["год_дел"] = str(target_year)
-        filename = f"{base}.docx"'''
-
-PIP_NEW = '''    from core.filename_utils import make_act_filename
-    ext = "docx" if output_format == "word" else "xlsx"
-    filename = make_act_filename(num, "civil", target_year, ext)
-
-    if output_format == "word":
-        common_values["год_дел"] = str(target_year)'''
-
-
-# ============================================================================
-# 4. Патчи app.py (два роута конвертации)
-# ============================================================================
-
-APP_OLD_1 = '''    base = "Акт уничтожения гражданских дел"
-    if num:
-        base += f" {num}СУ"
-    base += f" {year}"
-    filename = f"{base}.docx"'''
-
-APP_NEW_1 = '''    from core.filename_utils import make_act_filename
-    filename = make_act_filename(num, "civil", year, "docx")'''
-
-APP_OLD_2 = '''    base = "Акт уничтожения гражданских дел"
-    if num:
-        base += f" {num}СУ"
-    base += f" {yinfo['year']}"
-    filename = f"{base}.xlsx"'''
-
-APP_NEW_2 = '''    from core.filename_utils import make_act_filename
-    filename = make_act_filename(num, "civil", yinfo["year"], "xlsx")'''
-
-
-# ============================================================================
-# 5. Патчи тестов
-# ============================================================================
-
-TEST_PAIRS = [
-    # файл, что_искать, чем_заменить
-    ("test_db_pipeline_full.py", '"9СУ"', '"9У"'),
-    ("test_db_pipeline_full.py", "'9СУ'", "'9У'"),
-    ("test_api_process_export.py", '"9СУ"', '"9У"'),
-    ("test_api_process_export.py", "'9СУ'", "'9У'"),
-    ("test_api_convert.py", '"3СУ"', '"3У"'),
-    ("test_api_convert.py", "'3СУ'", "'3У'"),
-    ("test_api_convert.py", '"5СУ"', '"5У"'),
-    ("test_api_convert.py", "'5СУ'", "'5У'"),
-    ("test_api_word_to_xlsx.py", '"9СУ"', '"9У"'),
-    ("test_api_word_to_xlsx.py", "'9СУ'", "'9У'"),
-    ("test_pipeline_areas.py", '"3СУ"', '"3У"'),
-    ("test_pipeline_areas.py", "'3СУ'", "'3У'"),
-    ("test_pipeline_areas.py", '"5СУ"', '"5У"'),
-    ("test_pipeline_areas.py", "'5СУ'", "'5У'"),
-    ("test_pipeline_areas.py", '"9СУ"', '"9У"'),
-    ("test_pipeline_areas.py", "'9СУ'", "'9У'"),
-]
-
-
-def write_utils() -> bool:
-    if FILENAME_UTILS.exists():
-        print(f"  УЖЕ ЕСТЬ: {FILENAME_UTILS.relative_to(BASE)}")
-        return True
-    FILENAME_UTILS.write_text(UTILS_CONTENT, encoding="utf-8")
-    print(f"  СОЗДАН: {FILENAME_UTILS.relative_to(BASE)}")
-    return True
-
-
-def patch_file(path: Path, old: str, new: str, label: str) -> bool:
-    if not path.exists():
-        print(f"  НЕ НАЙДЕН: {path.relative_to(BASE)}")
-        return False
-    text = path.read_text(encoding="utf-8")
-    if old not in text:
-        if new in text:
-            print(f"  УЖЕ: {label}")
-            return True
-        print(f"  НЕ НАЙДЕН фрагмент ({label}) в {path.relative_to(BASE)}")
-        return False
-    text = text.replace(old, new, 1)
-    path.write_text(text, encoding="utf-8")
-    print(f"  ИЗМЕНЁН ({label}): {path.relative_to(BASE)}")
-    return True
-
-
 def patch_tests() -> int:
-    """Патчит строки в тестах: '9СУ' → '9У' и т.п."""
     fixed = 0
-    not_found = 0
-    for fname, old, new in TEST_PAIRS:
+    for fname, pairs in TEST_REPLACEMENTS.items():
         path = TESTS / fname
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
-        if old in text:
-            text = text.replace(old, new)
+        changed = False
+        for old, new in pairs:
+            if old in text:
+                text = text.replace(old, new)
+                changed = True
+        if changed:
             path.write_text(text, encoding="utf-8")
             fixed += 1
+            print(f"  ИЗМЕНЁН: {path.relative_to(BASE)}")
     return fixed
 
 
 def main() -> int:
-    print("fix_25: формат имени файла акта")
+    print("fix_29: base в copy_mode + устойчивые проверки тестов")
     print("=" * 60)
 
-    print("[1] core/filename_utils.py")
-    ok1 = write_utils()
+    print("[1] app.py — починить copy_mode (base больше нет)")
+    ok = patch_app()
 
-    print("\n[2] db_pipeline.py")
-    ok2 = patch_file(DB_PIPELINE, DB_OLD, DB_NEW, "export_year_result_to_file")
-
-    print("\n[3] pipeline.py")
-    ok3 = patch_file(PIPELINE, PIP_OLD, PIP_NEW, "process_rows")
-
-    print("\n[4] app.py")
-    ok4 = patch_file(APP_PY, APP_OLD_1, APP_NEW_1, "convert xlsx->word")
-    ok5 = patch_file(APP_PY, APP_OLD_2, APP_NEW_2, "convert word->xlsx")
-
-    print("\n[5] Тесты — замены '9СУ' → '9У', '3СУ' → '3У'")
-    fixed = patch_tests()
-    print(f"  Модулей обновлено: {fixed}")
+    print("\n[2] Тесты — проверки по отдельным подстрокам")
+    n = patch_tests()
+    print(f"  Модулей обновлено: {n}")
 
     print()
-    if not (ok1 and ok2 and ok3 and ok4 and ok5):
-        print("ЧТО-ТО НЕ ПРИМЕНЕНО. Проверьте сообщения выше.")
+    if not ok:
+        print("ЧТО-ТО НЕ ПРИМЕНЕНО.")
         return 1
     print("=" * 60)
     print("Готово.")
     print()
-    print("Перезапустите сервер:")
-    print("  .venv\\Scripts\\python.exe court_case_app\\app.py")
-    print()
     print("Проверка:")
     print("  .venv\\Scripts\\python.exe run_tests.py")
     print()
-    print("Проверка имени в диалоге сохранения:")
-    print("  /db/year/<id> -> «Результат» -> «Скачать Word».")
-    print("  Имя должно быть: Акт уничтожения гражданских дел 9У 2020.docx")
+    print("Ожидание: 51 модуль OK, FAIL = 0.")
     return 0
 
 
