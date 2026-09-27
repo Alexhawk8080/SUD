@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Год — База дел</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/year_page.css') }}">
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <h1>Акт уничтожения гражданских дел</h1>
+            <nav class="nav">
+                <a class="nav-link active" href="/db_page">База дел</a>
+                <a class="nav-link" href="/check_page">Проверка категорий</a>
+                <a class="nav-link" href="/convert_page">Конвертация</a>
+                <a class="nav-link" href="/inventory_page">Внутренняя опись</a>
+            </nav>
+        </div>
+    </header>
+
+    {% include "_sidebar.html" %}
+
+    <main class="container">
+        <section class="card">
+            <div class="year-header">
+                <h2 id="year-title">Год</h2>
+                <div class="year-header-flags">
+                    <span class="year-flag hidden" id="flag-incomplete">⚠ неполный</span>
+                    <span class="year-flag closed hidden" id="flag-closed">🔒 закрыт</span>
+                </div>
+            </div>
+
+            <nav class="tabs" id="year-tabs">
+                <button class="tab active" data-tab="refs">Реквизиты</button>
+                <button class="tab" data-tab="files">Файлы</button>
+                <button class="tab" data-tab="cases">Дела</button>
+                <button class="tab" data-tab="process">Обработка</button>
+                <button class="tab" data-tab="result">Результат</button>
+            </nav>
+        </section>
+
+        <!-- Вкладка «Реквизиты» -->
+        <section class="card tab-panel" id="tab-refs">
+            <h2>Реквизиты года</h2>
+            <p class="hint">Значения используются в Word-акте для этого года.
+                Изменения сохраняются в БД.</p>
+
+            <form id="refs-form">
+                <div class="form-row">
+                    <label class="field">Судья
+                        <input type="text" id="ref-судья" name="судья">
+                    </label>
+                    <label class="field">Секретарь
+                        <input type="text" id="ref-секретарь" name="секретарь">
+                    </label>
+                    <label class="field">№ акта
+                        <input type="text" id="ref-номер_акта" name="номер_акта">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="field">Дата утверждения
+                        <input type="text" id="ref-дата_утверждения" name="дата_утверждения">
+                    </label>
+                    <label class="field">Дата акта
+                        <input type="text" id="ref-дата_акта" name="дата_акта">
+                    </label>
+                    <label class="field">Дата подписи
+                        <input type="text" id="ref-дата_подписи" name="дата_подписи">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="field">Протокол ЭК: дата
+                        <input type="text" id="ref-протокол_эк_дата" name="протокол_эк_дата">
+                    </label>
+                    <label class="field">Протокол ЭК: номер
+                        <input type="text" id="ref-протокол_эк_номер" name="протокол_эк_номер">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="field">Заметка
+                        <input type="text" id="ref-note" name="note">
+                    </label>
+                    <label class="checkbox-row" title="Закрытый год нельзя редактировать без подтверждения">
+                        <input type="checkbox" id="ref-is_closed" name="is_closed">
+                        Год закрыт
+                    </label>
+                </div>
+
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary" id="refs-save">
+                        Сохранить реквизиты
+                    </button>
+                    <button type="button" class="btn btn-secondary hidden" id="refs-unlock">
+                        Разблокировать год
+                    </button>
+                </div>
+                <p class="error" id="refs-error"></p>
+                <p class="hint" id="refs-ok"></p>
+            </form>
+        </section>
+
+        <!-- Вкладка «Файлы» (D6c) -->
+        <section class="card tab-panel hidden" id="tab-files">
+            <h2>Файлы года</h2>
+            <p class="hint">Исходные таблицы и обработанные результаты.
+                Версии сохраняются; актуальную можно переключать.
+                Все версии хранятся до удаления вручную.</p>
+
+            <div class="drop-zone" id="files-drop-zone">
+                <p class="drop-hint">Перетащите .xlsx/.xlsm сюда или нажмите для выбора</p>
+                <input type="file" id="files-file-input" accept=".xlsx,.xlsm">
+            </div>
+            <p class="file-info" id="files-file-info"></p>
+
+            <div class="form-row">
+                <label class="field">Тип файла
+                    <select id="files-kind">
+                        <option value="source">Исходный (source)</option>
+                        <option value="processed">Обработанный (processed)</option>
+                    </select>
+                </label>
+                <label class="field">Тип дел
+                    <select id="files-case-type">
+                        <option value="civil">Гражданские</option>
+                        <option value="admin">Административные</option>
+                    </select>
+                </label>
+                <label class="field">Строка заголовков (пусто = авто)
+                    <input type="number" id="files-header-row"
+                           min="0" max="100" placeholder="авто">
+                </label>
+                <button class="btn btn-primary" id="files-upload-btn">Загрузить</button>
+            </div>
+            <p class="error" id="files-error"></p>
+            <p class="hint" id="files-ok"></p>
+
+            <div class="form-row">
+                <span class="field-label">Фильтр:</span>
+                <label class="radio-row">
+                    <input type="radio" name="files-filter" value="all" checked> Все
+                </label>
+                <label class="radio-row">
+                    <input type="radio" name="files-filter" value="source"> Исходные
+                </label>
+                <label class="radio-row">
+                    <input type="radio" name="files-filter" value="processed"> Обработанные
+                </label>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data-table" id="files-table">
+                    <thead>
+                        <tr>
+                            <th>Версия</th>
+                            <th>Тип</th>
+                            <th>Имя файла</th>
+                            <th>Строк</th>
+                            <th>Загружен</th>
+                            <th>Статус</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <p class="hint" id="files-empty">Пока нет файлов.</p>
+        </section>
+
+        <!-- Вкладка «Дела» (D6d) -->
+        <section class="card tab-panel hidden" id="tab-cases">
+            <h2>Дела</h2>
+            <p class="hint">Разобранные дела из выбранного файла.
+                Отображаются все, включая исключаемые при обработке
+                (алиментные, с неверным номером) — с пометкой.</p>
+
+            <div class="form-row">
+                <label class="field">Файл
+                    <select id="cases-source" style="min-width: 320px;">
+                        <option value="">— выберите файл —</option>
+                    </select>
+                </label>
+                <label class="field">Тип дел
+                    <select id="cases-type">
+                        <option value="civil">Гражданские</option>
+                        <option value="admin">Административные</option>
+                    </select>
+                </label>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="cases-only-valid">
+                    Только валидные
+                </label>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="cases-only-problematic">
+                    Только проблемные
+                </label>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="cases-only-alimony">
+                    Только алиментные
+                </label>
+            </div>
+
+            <p class="hint" id="cases-info"></p>
+            <p class="error" id="cases-error"></p>
+
+            <div class="table-wrap">
+                <table class="data-table" id="cases-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>№ дела</th>
+                            <th>Дата</th>
+                            <th>Истец</th>
+                            <th>Ответчик</th>
+                            <th>Категория</th>
+                            <th>№ описи</th>
+                            <th>№ ед.хр.</th>
+                            <th>Примечание</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <p class="hint" id="cases-empty">Пока нет данных.</p>
+        </section>
+
+        <!-- Вкладка «Обработка» (D6e) -->
+        <section class="card tab-panel hidden" id="tab-process">
+            <h2>Обработка</h2>
+            <p class="hint">Обработка разобранных дел за этот год.
+                Результат сохраняется в БД (перезаписывается при повторе).</p>
+
+            <div class="form-row">
+                <label class="field">Источник
+                    <select id="process-source" style="min-width: 320px;">
+                        <option value="">— выберите файл —</option>
+                    </select>
+                </label>
+                <label class="field">Тип дел
+                    <select id="process-type">
+                        <option value="civil">Гражданские</option>
+                        <option value="admin">Административные</option>
+                    </select>
+                </label>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="process-alimony">
+                    Включить алиментные дела
+                </label>
+                <label class="checkbox-row"
+                       title="Подставлять категории из словаря БД">
+                    <input type="checkbox" id="process-autofix" checked>
+                    Автоисправление категорий
+                </label>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-primary" id="process-btn">
+                    Обработать
+                </button>
+            </div>
+
+            <p class="error" id="process-error"></p>
+            <p class="hint" id="process-ok"></p>
+        </section>
+
+        <!-- Вкладка «Результат» (D6e) -->
+        <section class="card tab-panel hidden" id="tab-result">
+            <h2>Результат</h2>
+            <p class="hint">Сохранённый результат обработки за этот год.
+                Один на пару «год + тип дел». Обновляется при повторной
+                обработке.</p>
+
+            <div class="form-row">
+                <label class="field">Тип дел
+                    <select id="result-type">
+                        <option value="civil">Гражданские</option>
+                        <option value="admin">Административные</option>
+                    </select>
+                </label>
+                <button class="btn btn-secondary" id="result-reload">
+                    Обновить
+                </button>
+            </div>
+
+            <p class="hint" id="result-info"></p>
+            <p class="error" id="result-error"></p>
+
+            <div class="actions" id="result-actions">
+                <button class="btn btn-success" id="result-dl-word">
+                    Скачать Word (.docx)
+                </button>
+                <button class="btn btn-success" id="result-dl-excel">
+                    Скачать Excel (.xlsx)
+                </button>
+                <button class="btn btn-danger" id="result-delete">
+                    Удалить результат
+                </button>
+            </div>
+
+            <div class="table-wrap">
+                <table class="preview" id="result-table">
+                    <thead>
+                        <tr>
+                            <th>№ п/п</th>
+                            <th>Заголовок дела</th>
+                            <th>Даты дела</th>
+                            <th>№ описи</th>
+                            <th>№ ед.хр.</th>
+                            <th>Кол-во</th>
+                            <th>Срок хранения</th>
+                            <th>Примечание</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <p class="hint" id="result-empty">Результат ещё не создан.</p>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>Программа подготовки акта о выделении к уничтожению документов (гражданские дела)</p>
+    </footer>
+
+    <script>window.YEAR_ID = {{ year_id }};</script>
+    <script src="{{ url_for('static', filename='js/year_page.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/db_tree.js') }}"></script>
+</body>
+</html>

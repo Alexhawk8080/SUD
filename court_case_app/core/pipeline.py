@@ -91,9 +91,10 @@ def process_rows(rows, target_year, process_alimony: bool,
             except (TypeError, ValueError):
                 area_id_int = 0
             if area_id_int > 0:
-                area_values = db.court_area_settings_dict(conn, area_id_int)
+                area_values = db.court_area_settings_dict(
+                    conn, area_id_int, year=target_year)
                 if not area_values:
-                    area_values = None  # id не найден -> fallback на settings
+                    area_values = None  # id/год не найден -> fallback на settings
     finally:
         conn.close()
 
@@ -125,14 +126,12 @@ def process_rows(rows, target_year, process_alimony: bool,
             k: ("" if v is None else v) for k, v in dict(settings).items()
         }
 
-    base = "Акт уничтожения гражданских дел"
-    if num:
-        base += f" {num}СУ"
-    base += f" {target_year}"
+    from core.filename_utils import make_act_filename
+    ext = "docx" if output_format == "word" else "xlsx"
+    filename = make_act_filename(num, "civil", target_year, ext)
 
     if output_format == "word":
         common_values["год_дел"] = str(target_year)
-        filename = f"{base}.docx"
         out_path = os.path.join(output_dir, filename)
         write_word_result(records, template_path, out_path, common_values)
     else:

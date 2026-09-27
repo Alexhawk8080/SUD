@@ -49,9 +49,14 @@ TEMPLATE_DOCX = os.path.join(
     BASE_DIR, "docs", "АКТ уничтожения гражданских дел.docx")
 
 # Heartbeat: если вкладка интерфейса закрыта и heartbeat пропал — остановить сервер.
-# Web Worker шлёт heartbeat каждые 4 с; таймаут 20 с = запас на 4 пропуска
-# (переходы между страницами интерфейса, кратковременные паузы браузера).
-HEARTBEAT_TIMEOUT = 20.0  # секунд без heartbeat до остановки
+# Web Worker шлёт heartbeat каждые 4 с; таймаут 120 с — с запасом на:
+#   * переходы между страницами интерфейса;
+#   * открытый нативный диалог выбора файла (браузер приостанавливает
+#     таймеры вкладки, включая Web Worker, пока диалог открыт);
+#   * долгую обработку большого файла на сервере.
+# При закрытии вкладки сервер живёт ещё до 2 минут — приемлемо для
+# однопользовательского режима.
+HEARTBEAT_TIMEOUT = 120.0  # секунд без heartbeat до остановки
 _last_beat = time.time()
 
 
@@ -111,6 +116,20 @@ def check_page():
 @app.route("/heartbeat", methods=["GET"])
 def heartbeat():
     """Сигнал «вкладка жива» от клиента."""
+    global _last_beat
+    _last_beat = time.time()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/ping", methods=["GET", "POST"])
+def api_ping():
+    """
+    Явный «пинг живучести» для клиента.
+
+    Эквивалентен /heartbeat, но по нейтральному пути — используется,
+    например, в JS перед открытием нативного файлового диалога, чтобы
+    сервер не успел остановиться, пока таймеры вкладки заморожены.
+    """
     global _last_beat
     _last_beat = time.time()
     return jsonify({"ok": True})
@@ -493,11 +512,8 @@ def convert_xlsx_to_word_route():
         common_values = {k: ("" if v is None else v)
                          for k, v in dict(settings).items()}
 
-    base = "Акт уничтожения гражданских дел"
-    if num:
-        base += f" {num}СУ"
-    base += f" {year}"
-    filename = f"{base}.docx"
+    from core.filename_utils import make_act_filename
+    filename = make_act_filename(num, "civil", year, "docx")
     out_path = os.path.join(OUTPUT_DIR, filename)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -619,11 +635,8 @@ def convert_word_to_xlsx_route():
     refs = parsed.get("refs") or {}
     num = (refs.get("номер") or "").strip()
 
-    base = "Акт уничтожения гражданских дел"
-    if num:
-        base += f" {num}СУ"
-    base += f" {yinfo['year']}"
-    filename = f"{base}.xlsx"
+    from core.filename_utils import make_act_filename
+    filename = make_act_filename(num, "civil", yinfo["year"], "xlsx")
     out_path = os.path.join(OUTPUT_DIR, filename)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -683,6 +696,420 @@ def convert_word_to_xlsx_route():
         "preview": preview,
         "year": yinfo["year"],
     })
+
+
+# ---------------------------------------------------------------------------
+# Страница года (stage16d6a, заглушка)
+# ---------------------------------------------------------------------------
+
+@app.route("/db/year/<int:year_id>")
+def db_year_page(year_id):
+    """Страница года. Пока заглушка; табы появятся в D6b–D6e."""
+    return render_template("year.html", year_id=year_id)
+
+
+# ---------------------------------------------------------------------------
+# API: дерево базы дел (stage16d5a)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/db_tree")
+def api_db_tree():
+    """
+    Дерево «судебный участок → год» со счётчиками для сайдбара.
+
+    Возвращает:
+        {
+          "areas": [
+            {
+              "id": 1,
+              "номер": "9",
+              "name": "...", "address": "...", "note": "...",
+              "years": [
+                {
+                  "id": 1, "year": 2020,
+                  "is_closed": false, "is_incomplete": false,
+                  "files_count": 2,        # source_files (все версии)
+                  "cases_count": 5,        # cases (все версии)
+                  "result_id": 7,          # processing_results.id или null
+                  "result_is_stale": false,
+                },
+                ...
+              ],
+              "years_count": N,
+            },
+            ...
+          ],
+          "total_areas": N,
+        }
+    """
+    conn = get_db()
+    try:
+        areas = db.list_court_areas(conn)
+        result = []
+        for a in areas:
+            years = db.list_court_years(conn, a["id"])
+            years_info = []
+            for y in years:
+                # Все версии файлов и дел по этому году
+                files = db.list_source_files(conn, y["id"])
+                cases = db.list_cases(conn)  # фильтр ниже
+                # Отфильтруем cases по годам: они привязаны к source_file_id
+                sf_ids = {f["id"] for f in files}
+                cases_in_year = [c for c in cases
+                                 if c["source_file_id"] in sf_ids]
+                # Результат (один на год+тип; для UI возьмём civil)
+                proc = db.get_processing_result_by_pair(
+                    conn, y["id"], "civil")
+                years_info.append({
+                    "id": y["id"],
+                    "year": y["year"],
+                    "is_closed": y["is_closed"],
+                    "is_incomplete": y["is_incomplete"],
+                    "files_count": len(files),
+                    "cases_count": len(cases_in_year),
+                    "result_id": proc["id"] if proc else None,
+                    "result_is_stale": bool(proc and proc["is_stale"]),
+                })
+            result.append({
+                "id": a["id"],
+                "номер": a["номер"],
+                "name": a["name"],
+                "address": a["address"],
+                "note": a["note"],
+                "years": years_info,
+                "years_count": len(years_info),
+            })
+        return jsonify({"areas": result, "total_areas": len(result)})
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# API: source_files и cases (stage16d5b)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/court_years/<int:year_id>/source_files", methods=["GET"])
+def api_source_files_list(year_id):
+    """Список версий файлов года. Параметр file_kind: source|processed."""
+    kind = request.args.get("file_kind", "").strip() or None
+    conn = get_db()
+    try:
+        if not db.get_court_year(conn, year_id):
+            return _json_error("Год не найден", 404)
+        return jsonify(db.list_source_files(conn, year_id, file_kind=kind))
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_years/<int:year_id>/source_files", methods=["POST"])
+def api_source_files_upload(year_id):
+    """
+    Загрузка файла в БД. multipart/form-data:
+        file          — .xlsx / .xlsm
+        file_kind     — 'source' (по умолчанию) | 'processed'
+        case_type     — 'civil' (по умолчанию) | 'admin'
+        sheet_name    — (опционально) имя листа
+        header_row    — (опционально) номер строки заголовков
+        mapping_json  — (опционально) JSON маппинга ролей
+    """
+    if "file" not in request.files:
+        return _json_error("Файл не загружен")
+    uploaded = request.files["file"]
+    if not uploaded.filename:
+        return _json_error("Файл не выбран")
+
+    ext = os.path.splitext(uploaded.filename)[1].lower()
+    if ext not in (".xlsx", ".xlsm"):
+        return _json_error("Ожидается файл .xlsx или .xlsm")
+
+    file_kind = (request.form.get("file_kind") or "source").strip()
+    if file_kind not in ("source", "processed"):
+        return _json_error("file_kind должен быть 'source' или 'processed'")
+
+    case_type = (request.form.get("case_type") or "civil").strip()
+    if case_type not in ("civil", "admin"):
+        return _json_error("case_type должен быть 'civil' или 'admin'")
+
+    sheet_name = (request.form.get("sheet_name") or "").strip()
+    header_raw = (request.form.get("header_row") or "").strip()
+    header_row = None
+    if header_raw:
+        try:
+            header_row = int(header_raw)
+            if header_row < 0:
+                header_row = 0
+        except ValueError:
+            header_row = None
+
+    mapping = None
+    mapping_raw = (request.form.get("mapping_json") or "").strip()
+    if mapping_raw:
+        try:
+            mapping = json.loads(mapping_raw)
+        except ValueError:
+            return _json_error("mapping_json не является JSON")
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    path = os.path.join(UPLOAD_DIR, os.path.basename(uploaded.filename))
+    uploaded.save(path)
+
+    from core.db_pipeline import save_year_source_from_xlsx
+
+    conn = get_db()
+    try:
+        if not db.get_court_year(conn, year_id):
+            return _json_error("Год не найден", 404)
+        result = save_year_source_from_xlsx(
+            conn, year_id, path, os.path.basename(uploaded.filename),
+            sheet_name=sheet_name, header_row=header_row, mapping=mapping,
+            file_kind=file_kind, case_type=case_type)
+        return jsonify({"ok": True, **result})
+    except ValueError as exc:
+        return _json_error(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _json_error(f"Ошибка загрузки: {exc}", 500)
+    finally:
+        conn.close()
+
+
+@app.route("/api/source_files/<int:file_id>", methods=["GET"])
+def api_source_file_get(file_id):
+    conn = get_db()
+    try:
+        rec = db.get_source_file(conn, file_id)
+        if not rec:
+            return _json_error("Файл не найден", 404)
+        return jsonify(rec)
+    finally:
+        conn.close()
+
+
+@app.route("/api/source_files/<int:file_id>/content", methods=["GET"])
+def api_source_file_content(file_id):
+    """Отдаёт BLOB файла как вложение."""
+    conn = get_db()
+    try:
+        rec = db.get_source_file(conn, file_id)
+        if not rec:
+            return _json_error("Файл не найден", 404)
+        content = db.get_source_file_content(conn, file_id)
+        if content is None:
+            return _json_error("Содержимое не найдено", 404)
+        from io import BytesIO
+        return send_file(
+            BytesIO(content),
+            as_attachment=True,
+            download_name=rec["filename"] or "file.xlsx")
+    finally:
+        conn.close()
+
+
+@app.route("/api/source_files/<int:file_id>/set_current", methods=["POST"])
+def api_source_file_set_current(file_id):
+    conn = get_db()
+    try:
+        ok = db.set_current_source_file(conn, file_id)
+        if not ok:
+            return _json_error("Файл не найден", 404)
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+@app.route("/api/source_files/<int:file_id>", methods=["DELETE"])
+def api_source_file_delete(file_id):
+    conn = get_db()
+    try:
+        if not db.get_source_file(conn, file_id):
+            return _json_error("Файл не найден", 404)
+        db.delete_source_file(conn, file_id)
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+@app.route("/api/source_files/<int:file_id>/cases", methods=["GET"])
+def api_source_file_cases(file_id):
+    """Список дел версии. Параметр case_type: civil|admin."""
+    case_type = request.args.get("case_type", "").strip() or None
+    conn = get_db()
+    try:
+        if not db.get_source_file(conn, file_id):
+            return _json_error("Файл не найден", 404)
+        return jsonify(db.list_cases(conn, source_file_id=file_id,
+                                      case_type=case_type))
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# API: обработка и экспорт (stage16d5c)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/court_years/<int:year_id>/process", methods=["POST"])
+def api_year_process(year_id):
+    """
+    Запуск обработки по данным года (из актуального source_file).
+
+    Тело JSON:
+        {
+          "case_type": "civil"|"admin",
+          "process_alimony": true|false,
+          "source_file_id": int|null,   # конкретная версия (опц.)
+          "category_fixes": {...},      # номер -> категория (опц.)
+          "auto_fix": true|false,       # автоисправление категорий
+          "court_area_id": int|null     # если не задан — берётся из года
+        }
+
+    Возвращает:
+        {
+          "ok": true,
+          "result_id": int,
+          "source_file_id": int,
+          "record_count": int,
+          "stats": {...},
+          "target_year": int
+        }
+    """
+    data = request.get_json(force=True) or {}
+    case_type = (data.get("case_type") or "civil").strip()
+    if case_type not in ("civil", "admin"):
+        return _json_error("case_type должен быть 'civil' или 'admin'")
+
+    process_alimony = bool(data.get("process_alimony", False))
+    source_file_id = data.get("source_file_id")
+    if source_file_id is not None:
+        try:
+            source_file_id = int(source_file_id)
+        except (TypeError, ValueError):
+            return _json_error("source_file_id должен быть числом")
+
+    category_fixes = data.get("category_fixes") or {}
+    if not isinstance(category_fixes, dict):
+        return _json_error("category_fixes должен быть объектом")
+    # Нормализация ключей
+    category_fixes = {str(k).strip(): v
+                      for k, v in category_fixes.items() if str(k).strip()}
+
+    auto_fix_enabled = bool(data.get("auto_fix", True))
+
+    court_area_id = data.get("court_area_id")
+    if court_area_id is not None:
+        try:
+            court_area_id = int(court_area_id)
+        except (TypeError, ValueError):
+            return _json_error("court_area_id должен быть числом")
+
+    from core.db_pipeline import process_year
+
+    conn = get_db()
+    try:
+        cy = db.get_court_year(conn, year_id)
+        if not cy:
+            return _json_error("Год не найден", 404)
+
+        # Если court_area_id не передан — берём из года
+        if court_area_id is None:
+            court_area_id = cy["court_area_id"]
+
+        result = process_year(
+            conn, year_id,
+            case_type=case_type,
+            process_alimony=process_alimony,
+            category_fixes=category_fixes or None,
+            auto_fix_enabled=auto_fix_enabled,
+            court_area_id=court_area_id,
+            source_file_id=source_file_id)
+        return jsonify({"ok": True, **result})
+    except ValueError as exc:
+        return _json_error(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _json_error(f"Ошибка обработки: {exc}", 500)
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_years/<int:year_id>/results", methods=["GET"])
+def api_year_results(year_id):
+    """Список результатов года (может быть civil и admin)."""
+    conn = get_db()
+    try:
+        if not db.get_court_year(conn, year_id):
+            return _json_error("Год не найден", 404)
+        return jsonify(db.list_processing_results(conn, year_id))
+    finally:
+        conn.close()
+
+
+@app.route("/api/results/<int:result_id>", methods=["GET"])
+def api_result_get(result_id):
+    """Шапка + строки результата."""
+    conn = get_db()
+    try:
+        rec = db.get_processing_result(conn, result_id)
+        if not rec:
+            return _json_error("Результат не найден", 404)
+        rows = db.list_result_rows(conn, result_id)
+        rec["rows"] = rows
+        return jsonify(rec)
+    finally:
+        conn.close()
+
+
+@app.route("/api/results/<int:result_id>/export", methods=["POST"])
+def api_result_export(result_id):
+    """
+    Экспорт результата в .docx / .xlsx.
+
+    Тело JSON:
+        {
+          "output_format": "word"|"excel",
+          "columns": [...]  # опционально для Excel
+        }
+
+    Возвращает файл (send_file).
+    """
+    data = request.get_json(force=True) or {}
+    output_format = (data.get("output_format") or "word").strip()
+    if output_format not in ("word", "excel"):
+        return _json_error("output_format должен быть 'word' или 'excel'")
+
+    columns = data.get("columns") or None
+    if columns is not None and not isinstance(columns, list):
+        return _json_error("columns должен быть списком")
+
+    from core.db_pipeline import export_year_result_to_file
+
+    conn = get_db()
+    try:
+        if not db.get_processing_result(conn, result_id):
+            return _json_error("Результат не найден", 404)
+        result = export_year_result_to_file(
+            conn, result_id,
+            template_path=TEMPLATE_DOCX,
+            output_dir=OUTPUT_DIR,
+            output_format=output_format,
+            columns=columns)
+        return send_file(result["path"], as_attachment=True,
+                         download_name=result["filename"])
+    except ValueError as exc:
+        return _json_error(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _json_error(f"Ошибка экспорта: {exc}", 500)
+    finally:
+        conn.close()
+
+
+@app.route("/api/results/<int:result_id>", methods=["DELETE"])
+def api_result_delete(result_id):
+    conn = get_db()
+    try:
+        if not db.get_processing_result(conn, result_id):
+            return _json_error("Результат не найден", 404)
+        db.delete_processing_result(conn, result_id)
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -883,7 +1310,7 @@ def api_orgs_delete(org_id):
 
 
 # ---------------------------------------------------------------------------
-# API: судебные участки (stage11d, под-этап A4)
+# API: судебные участки и годы (stage16a1a, схема v2)
 # ---------------------------------------------------------------------------
 
 @app.route("/api/court_areas", methods=["GET"])
@@ -941,6 +1368,107 @@ def api_court_areas_delete(area_id):
     try:
         db.delete_court_area(conn, area_id)
         return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_areas/<int:area_id>/years", methods=["GET"])
+def api_court_years_list(area_id):
+    conn = get_db()
+    try:
+        if not db.get_court_area(conn, area_id):
+            return _json_error("Участок не найден", 404)
+        return jsonify(db.list_court_years(conn, area_id))
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_areas/<int:area_id>/years", methods=["POST"])
+def api_court_years_add(area_id):
+    data = request.get_json(force=True)
+    year = data.get("year")
+    try:
+        year_int = int(year)
+    except (TypeError, ValueError):
+        return _json_error("Укажите год (число)")
+    conn = get_db()
+    try:
+        if not db.get_court_area(conn, area_id):
+            return _json_error("Участок не найден", 404)
+        if db.court_year_for(conn, area_id, year_int):
+            return _json_error(f"Год {year_int} уже существует у этого участка")
+        yid = db.add_court_year(conn, area_id, year_int, data)
+        return jsonify({"ok": True, "id": yid})
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_years/<int:year_id>", methods=["GET"])
+def api_court_year_get(year_id):
+    conn = get_db()
+    try:
+        rec = db.get_court_year(conn, year_id)
+        if not rec:
+            return _json_error("Год не найден", 404)
+        return jsonify(rec)
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_years/<int:year_id>", methods=["PUT"])
+def api_court_year_update(year_id):
+    data = request.get_json(force=True)
+    conn = get_db()
+    try:
+        if not db.get_court_year(conn, year_id):
+            return _json_error("Год не найден", 404)
+        db.update_court_year(conn, year_id, data)
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_years/<int:year_id>", methods=["DELETE"])
+def api_court_year_delete(year_id):
+    conn = get_db()
+    try:
+        db.delete_court_year(conn, year_id)
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+@app.route("/api/court_areas/<int:area_id>/copy_refs", methods=["POST"])
+def api_court_area_copy_refs(area_id):
+    """
+    Копирование реквизитов из одного года в другой у того же участка.
+
+    Тело JSON: {"from_year": 2019, "to_year": 2020}
+    """
+    data = request.get_json(force=True) or {}
+    try:
+        from_year = int(data.get("from_year"))
+        to_year = int(data.get("to_year"))
+    except (TypeError, ValueError):
+        return _json_error("Укажите from_year и to_year (числа)")
+
+    conn = get_db()
+    try:
+        if not db.get_court_area(conn, area_id):
+            return _json_error("Участок не найден", 404)
+        src = db.court_year_for(conn, area_id, from_year)
+        if not src:
+            return _json_error(f"Год {from_year} не найден")
+        dst = db.court_year_for(conn, area_id, to_year)
+        payload = {f: src.get(f, "") for f in (
+            "судья", "секретарь", "дата_утверждения", "дата_акта",
+            "номер_акта", "дата_подписи", "протокол_эк_дата",
+            "протокол_эк_номер")}
+        if dst:
+            db.update_court_year(conn, dst["id"], {**dst, **payload})
+            return jsonify({"ok": True, "updated": dst["id"]})
+        yid = db.add_court_year(conn, area_id, to_year, payload)
+        return jsonify({"ok": True, "created": yid})
     finally:
         conn.close()
 
@@ -1069,8 +1597,21 @@ def api_settings_save():
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    # Инициализация БД при старте
-    get_db().close()
+    # Инициализация БД при старте.
+    # stage16a1c: если схема старая (v1) — просим запустить миграцию.
+    try:
+        get_db().close()
+    except RuntimeError as exc:
+        print()
+        print("=" * 64)
+        print("ТРЕБУЕТСЯ МИГРАЦИЯ БАЗЫ ДАННЫХ")
+        print("=" * 64)
+        print(str(exc))
+        print()
+        print("Запустите:")
+        print("  .venv\\Scripts\\python.exe migrate_db_v2.py")
+        print()
+        sys.exit(1)
     # Автозапуск браузера и контроль закрытия вкладки (остановка сервера)
     start_beat_watchdog()
     threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:5000")).start()

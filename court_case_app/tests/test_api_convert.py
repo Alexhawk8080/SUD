@@ -139,16 +139,27 @@ def main():
     check("Сообщение про номера дел", "номер" in err.lower(), True)
 
     print("\n[6] POST /convert/xlsx_to_word: базовый JSON-ответ")
+    # В v2 реквизиты живут в court_years, поэтому создаём участок и год,
+    # чтобы имя файла получило 'NСУ'.
+    r = client.post("/api/court_areas", json={"номер": "3"})
+    area3 = r.get_json()["id"]
+    client.post(f"/api/court_areas/{area3}/years", json={
+        "year": 2020,
+        "судья": "Тест", "секретарь": "Тест",
+        "дата_утверждения": "—", "дата_акта": "—",
+        "номер_акта": "1", "дата_подписи": "—",
+        "протокол_эк_дата": "—", "протокол_эк_номер": "1",
+    })
     with open(xlsx_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "результат.xlsx"),
-                "year": "2020"}
+                "year": "2020", "court_area_id": str(area3)}
         r = client.post("/convert/xlsx_to_word", data=data,
                         content_type="multipart/form-data")
     check("HTTP 200", r.status_code, 200)
     j = r.get_json()
     check("filename есть", bool(j.get("filename")), True)
-    check("filename с '3СУ' и '2020'",
-          "3СУ" in j["filename"] and "2020" in j["filename"], True)
+    check("filename с '3У' и '2020'",
+          "3У" in j["filename"] and "2020" in j["filename"], True)
     check("count = 6", j.get("count"), 6)
     check("preview = 6", len(j.get("preview") or []), 6)
 
@@ -161,7 +172,7 @@ def main():
     print("\n[8] Повторный POST без overwrite -> 409")
     with open(xlsx_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "результат.xlsx"),
-                "year": "2020"}
+                "year": "2020", "court_area_id": str(area3)}
         r = client.post("/convert/xlsx_to_word", data=data,
                         content_type="multipart/form-data")
     check("HTTP 409", r.status_code, 409)
@@ -172,7 +183,8 @@ def main():
     print("\n[9] overwrite=1 -> 200 и перезапись")
     with open(xlsx_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "результат.xlsx"),
-                "year": "2020", "overwrite": "1"}
+                "year": "2020", "overwrite": "1",
+                "court_area_id": str(area3)}
         r = client.post("/convert/xlsx_to_word", data=data,
                         content_type="multipart/form-data")
     check("HTTP 200", r.status_code, 200)
@@ -181,7 +193,8 @@ def main():
     print("\n[10] copy=1 -> 200 и файл с (1)")
     with open(xlsx_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "результат.xlsx"),
-                "year": "2020", "copy": "1"}
+                "year": "2020", "copy": "1",
+                "court_area_id": str(area3)}
         r = client.post("/convert/xlsx_to_word", data=data,
                         content_type="multipart/form-data")
     check("HTTP 200", r.status_code, 200)
@@ -192,7 +205,8 @@ def main():
     print("\n[11] download=1 -> send_file")
     with open(xlsx_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "результат.xlsx"),
-                "year": "2020", "copy": "1", "download": "1"}
+                "year": "2020", "copy": "1", "download": "1",
+                "court_area_id": str(area3)}
         r = client.post("/convert/xlsx_to_word", data=data,
                         content_type="multipart/form-data")
     check("HTTP 200", r.status_code, 200)
@@ -218,17 +232,20 @@ def main():
     check("HTTP 400", r.status_code, 400)
 
     print("\n[14] court_area_id: создаём участок, конвертируем с ним")
-    r = client.post("/api/court_areas", json={
-        "номер": "5", "судья": "Пятый П. П.",
+    r = client.post("/api/court_areas", json={"номер": "5"})
+    check("Участок создан", r.status_code, 200)
+    area_id = r.get_json()["id"]
+    # Создаём год с реквизитами (в v2 они живут в court_years)
+    r = client.post(f"/api/court_areas/{area_id}/years", json={
+        "year": 2020,
+        "судья": "Пятый П. П.", "секретарь": "Сек5 С. С.",
         "дата_утверждения": "«___» ______________ 20__ года",
         "дата_акта": "«__» ____________ 20__ г.", "номер_акта": "1",
-        "секретарь": "Сек5 С. С.",
         "дата_подписи": "«__» ____________ 20__ г.",
         "протокол_эк_дата": "«__» ____________ 20__ г.",
         "протокол_эк_номер": "1",
     })
-    check("Участок создан", r.status_code, 200)
-    area_id = r.get_json()["id"]
+    check("Год создан", r.status_code, 200)
     with open(xlsx_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "результат.xlsx"),
                 "year": "2020", "court_area_id": str(area_id),
@@ -237,7 +254,7 @@ def main():
                         content_type="multipart/form-data")
     check("HTTP 200", r.status_code, 200)
     j = r.get_json()
-    check("filename с '5СУ'", "5СУ" in j.get("filename", ""), True)
+    check("filename с '5У'", "5У" in j.get("filename", ""), True)
     out_file = os.path.join(out_dir, j["filename"])
     doc = Document(out_file)
     text = "\n".join(p.text for p in doc.paragraphs)

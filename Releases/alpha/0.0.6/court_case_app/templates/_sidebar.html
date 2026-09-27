@@ -1,0 +1,15 @@
+{# Постоянный сайдбар с деревом «участок → год».
+   Подключается в каждой странице через {% include "_sidebar.html" %}. #}
+<aside class="sidebar" id="db-sidebar">
+    <div class="sidebar-header">
+        <span class="sidebar-title">База дел</span>
+        <button class="sidebar-toggle" id="sidebar-toggle"
+                title="Свернуть / развернуть">&#9776;</button>
+    </div>
+    <div class="sidebar-body" id="db-tree">
+        <p class="sidebar-hint" id="sidebar-status">Загрузка…</p>
+    </div>
+    <div class="sidebar-footer">
+        <a href="/db_page" class="sidebar-action">+ Участники / годы</a>
+    </div>
+</aside>

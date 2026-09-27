@@ -90,8 +90,8 @@ def main():
     check("HTTP 200", r.status_code, 200)
     j = r.get_json()
     check("filename есть", bool(j.get("filename")), True)
-    check("filename с '9СУ' и '2020'",
-          "9СУ" in j["filename"] and "2020" in j["filename"], True)
+    check("filename с '9У' и '2020'",
+          "9У" in j["filename"] and "2020" in j["filename"], True)
     check("count = 3", j.get("count"), 3)
     check("total = 3", j.get("total"), 3)
     check("attention — список", isinstance(j.get("attention"), list), True)
