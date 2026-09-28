@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# stage_38
 """
 Связка «файл -> БД» для новой иерархии (court_areas -> court_years ->
 source_files -> cases).
@@ -224,7 +225,8 @@ def process_year(conn, court_year_id: int, *, case_type: str = "civil",
                  category_fixes: dict = None,
                  auto_fix_enabled: bool = True,
                  court_area_id: int = None,
-                 source_file_id: int = None) -> dict:
+                 source_file_id: int = None,
+                 diff_logging: bool = False) -> dict:
     """
     Прогоняет обработку по данным из БД и сохраняет результат.
 
@@ -319,7 +321,8 @@ def process_year(conn, court_year_id: int, *, case_type: str = "civil",
             organizations, exclusions,
             keywords=keywords, texts=texts,
             category_fixes=category_fixes or None,
-            auto_fix_map=auto_fix_map or None)
+            auto_fix_map=auto_fix_map or None,
+            diff_logging=diff_logging)
 
     # 6. Дополняем case_number (извлекаем из title)
     for r in records:

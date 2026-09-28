@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# stage_41
 """
 Веб-приложение «Акт уничтожения гражданских дел».
 
@@ -266,6 +267,16 @@ def db_page():
 def check_page():
     """Страница «Проверка категорий» (Доработка 6)."""
     return render_template("check.html")
+
+
+@app.route("/settings_page")
+def settings_page():
+    """Страница настроек приложения (stage_42).
+
+    Показывает глобальные флаги поведения (auto_fix_categories,
+    taxonomy_diff_logging). Сохранение — через POST /api/settings.
+    """
+    return render_template("settings.html")
 
 
 @app.route("/heartbeat", methods=["GET"])
@@ -1264,6 +1275,11 @@ def api_year_process(year_id):
         if court_area_id is None:
             court_area_id = cy["court_area_id"]
 
+        # stage_41: diff_logging включается глобальной настройкой БД
+        # 'taxonomy_diff_logging' ('0'/'1'), дефолт — выключено.
+        taxonomy_diff_logging = (
+            db.get_setting(conn, "taxonomy_diff_logging", "0") == "1")
+
         result = process_year(
             conn, year_id,
             case_type=case_type,
@@ -1271,7 +1287,8 @@ def api_year_process(year_id):
             category_fixes=category_fixes or None,
             auto_fix_enabled=auto_fix_enabled,
             court_area_id=court_area_id,
-            source_file_id=source_file_id)
+            source_file_id=source_file_id,
+            diff_logging=taxonomy_diff_logging)
         return jsonify({"ok": True, **result})
     except ValueError as exc:
         return _json_error(str(exc))

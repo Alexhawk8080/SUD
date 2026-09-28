@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# stage_37
 """
 Ядро обработки гражданских дел.
 
@@ -21,6 +22,9 @@ from .category_check import (
     is_problematic,
     most_frequent,
 )
+# stage_37: C-сценарий — таксономия для логирования расхождений.
+from .category_processor_taxonomy import taxonomy_prefix, taxonomy_retention
+from .taxonomy_diff import log_prefix_diff, log_retention_diff
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +276,8 @@ def build_case_record(src_row, prefix: str, exclusions, organizations: dict,
 def process_cases(rows, target_year, process_alimony: bool,
                   organizations: dict, exclusions,
                   keywords=None, texts=None,
-                  category_fixes=None, auto_fix_map=None):
+                  category_fixes=None, auto_fix_map=None,
+                  diff_logging: bool = False):
     """
     Обработка списка строк исходной таблицы.
 
@@ -360,6 +365,19 @@ def process_cases(rows, target_year, process_alimony: bool,
                                            organizations, keywords, texts,
                                            category=category)
                 record["sequential"] = sequential
+
+                # stage_37: C-сценарий. Продукт работает по VBA;
+                # таксономия только пишет расхождения в логи.
+                if diff_logging:
+                    tax_prefix = taxonomy_prefix(category)
+                    if tax_prefix is not None:
+                        log_prefix_diff(rows[idx].get("case_number"),
+                                        category, prefix, tax_prefix)
+                    tax_ret = taxonomy_retention(category)
+                    if tax_ret is not None:
+                        log_retention_diff(rows[idx].get("case_number"),
+                                           category, record.get("retention"),
+                                           tax_ret)
             else:
                 record = build_empty_record(sequential)
             records.append(record)

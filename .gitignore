@@ -76,3 +76,5 @@ court_case_app/tests/fixtures/
 
 # --- Служебные скрипты разработки (fix_*, stage_*, release_*) ---
 /_dev/
+*_diff.log
+\n*_summary.log\n
