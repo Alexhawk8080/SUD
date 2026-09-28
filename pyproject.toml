@@ -23,13 +23,13 @@ ignore = ["E501"]
 [tool.black]
 line-length = 100
 target-version = ["py312"]
-extend-exclude = """
+extend-exclude = '''
 /(
     \.venv
   | coverage_html
   | \.pytest_cache
 )/
-"""
+'''
 
 [tool.pytest.ini_options]
 testpaths = ["court_case_app/tests"]

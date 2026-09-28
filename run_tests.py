@@ -1,19 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Единая точка прогона всех тестов проекта.
+Dual-runner тестов: legacy (subprocess) + modern (pytest).
 
-Запускает каждый tests/test_*.py как отдельный процесс. В консоль
-выводится по одной строке на модуль плюс итог. Полные логи пишутся:
+  * legacy (без "^def test_" на верхнем уровне) — subprocess, exit code;
+  * modern (с "^def test_") — pytest через subprocess, exit code.
 
-    test.log        — весь вывод всех модулей (перезаписывается каждый раз);
-    test_error.log  — только провалившиеся модули + итог
-                      (если провалов нет — файл создаётся пустым).
+Оба варианта запускаются VENV_PY. Формат вывода и test_error.log сохранены.
 
 Запуск:
     .venv\\Scripts\\python.exe run_tests.py
 """
 
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -31,15 +30,31 @@ def venv_python() -> Path:
     return BASE / ".venv" / "bin" / "python"
 
 
-def run_module(python: Path, test_file: Path) -> tuple:
-    """Запускает один тест. Возвращает (returncode, stdout, stderr)."""
+def is_modern(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    return re.search(r"^def test_", text, re.MULTILINE) is not None
+
+
+def run_legacy(python: Path, test_file: Path):
     r = subprocess.run(
         [str(python), str(test_file)],
         cwd=str(BASE / "court_case_app"),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    return r.returncode, r.stdout or "", r.stderr or ""
+
+
+def run_modern(python: Path, test_file: Path):
+    r = subprocess.run(
+        [str(python), "-m", "pytest", str(test_file),
+         "-q", "--tb=short", "-p", "no:cacheprovider"],
+        cwd=str(BASE / "court_case_app"),
+        capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     return r.returncode, r.stdout or "", r.stderr or ""
 
@@ -52,11 +67,10 @@ def _log_header(log, count: int) -> None:
     log.write("=" * 78 + "\n\n")
 
 
-def _log_module(log, test_file: Path, rc: int,
-                stdout: str, stderr: str) -> None:
+def _log_module(log, test_file, rc, stdout, stderr, kind) -> None:
     status = "OK" if rc == 0 else "FAIL"
     log.write("=" * 78 + "\n")
-    log.write(f"  {test_file.name}  [{status}]  (exit={rc})\n")
+    log.write(f"  {test_file.name}  [{status}]  ({kind}, exit={rc})\n")
     log.write("=" * 78 + "\n")
     if stdout:
         log.write(stdout)
@@ -74,7 +88,6 @@ def main() -> int:
     python = venv_python()
     if not python.exists():
         print(f"НЕ НАЙДЕН интерпретатор .venv: {python}")
-        print("Сначала запустите: python setup_env.py")
         return 1
 
     if not TESTS_DIR.exists():
@@ -86,6 +99,9 @@ def main() -> int:
         print("Тестов не найдено.")
         return 1
 
+    legacy = [f for f in test_files if not is_modern(f)]
+    modern = [f for f in test_files if is_modern(f)]
+
     ok = 0
     failed = []
 
@@ -95,18 +111,28 @@ def main() -> int:
         _log_header(log, len(test_files))
         _log_header(err_log, len(test_files))
 
-        for tf in test_files:
-            rc, out, err = run_module(python, tf)
+        for tf in legacy:
+            rc, out, err = run_legacy(python, tf)
             status = "OK" if rc == 0 else "FAIL"
             print(f"{tf.name} - {status}")
-            _log_module(log, tf, rc, out, err)
+            _log_module(log, tf, rc, out, err, "legacy")
             if rc == 0:
                 ok += 1
             else:
                 failed.append(tf.name)
-                _log_module(err_log, tf, rc, out, err)
+                _log_module(err_log, tf, rc, out, err, "legacy")
 
-        # Итог в оба лога
+        for tf in modern:
+            rc, out, err = run_modern(python, tf)
+            status = "OK" if rc == 0 else "FAIL"
+            print(f"{tf.name} - {status}")
+            _log_module(log, tf, rc, out, err, "modern")
+            if rc == 0:
+                ok += 1
+            else:
+                failed.append(tf.name)
+                _log_module(err_log, tf, rc, out, err, "modern")
+
         summary = (
             "=" * 78 + "\n"
             f"ИТОГО: модулей OK = {ok}, FAIL = {len(failed)}\n"
@@ -121,6 +147,7 @@ def main() -> int:
 
     print()
     print(f"ИТОГО: модулей OK = {ok}, FAIL = {len(failed)}")
+    print(f"  legacy: {len(legacy)}, modern: {len(modern)}")
     if failed:
         print(f"Подробности: {ERROR_LOG_PATH.name}")
         return 1
