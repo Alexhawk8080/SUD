@@ -1556,12 +1556,56 @@
         });
     };
 
+    // ---------- Страница настроек (stage_42) ----------
+
+    App.initSettingsPage = function () {
+        var saveBtn = document.getElementById("settings-save");
+        var statusEl = document.getElementById("settings-status");
+        var boxes = document.querySelectorAll(
+            "#set-auto-fix, #set-taxonomy-diff");
+
+        function setStatus(text, isError) {
+            if (!statusEl) return;
+            statusEl.textContent = text;
+            statusEl.style.color = isError ? "#c00" : "#080";
+        }
+
+        function load() {
+            request("GET", "/api/settings").then(function (s) {
+                boxes.forEach(function (b) {
+                    var key = b.dataset.key;
+                    var v = (s && s[key] != null) ? String(s[key]) : "";
+                    b.checked = (v === "1");
+                });
+                setStatus("", false);
+            }).catch(function (err) {
+                setStatus("Ошибка загрузки: " + err.message, true);
+            });
+        }
+
+        function save() {
+            var data = {};
+            boxes.forEach(function (b) {
+                data[b.dataset.key] = b.checked ? "1" : "0";
+            });
+            request("POST", "/api/settings", data).then(function () {
+                setStatus("Сохранено", false);
+            }).catch(function (err) {
+                setStatus("Ошибка сохранения: " + err.message, true);
+            });
+        }
+
+        saveBtn.addEventListener("click", save);
+        load();
+    };
+
     // Автоинициализация и heartbeat
     document.addEventListener("DOMContentLoaded", function () {
         startHeartbeat();
         if (document.getElementById("process-btn")) App.initIndexPage();
         if (document.getElementById("check-btn")) App.initCheckPage();
         if (document.getElementById("convert-btn")) App.initConvertPage();
+        if (document.getElementById("settings-save")) App.initSettingsPage();
         if (document.getElementById("inv-inspect-btn")) {
             App.initInventoryPage();
         }
