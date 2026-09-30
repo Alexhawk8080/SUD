@@ -1,4 +1,5 @@
 # stage_46
+# fix_48_02
 # -*- coding: utf-8 -*-
 """Тесты переноса Excel → Word-акт (stage_46)."""
 import os
@@ -110,13 +111,13 @@ def main():
     check("строка 2, столбец 7 = срок",
           out.cell(2, 6).text.strip(), "3 года ЭК Ст. 137")
 
-    print("\n[5] Столбец 1 не заполнен текстом (для автонумерации)")
-    check("строка 1, столбец 1 пуст",
-          out.cell(1, 0).text.strip(), "")
-    check("строка 2, столбец 1 пуст",
-          out.cell(2, 0).text.strip(), "")
-    check("строка 3, столбец 1 пуст",
-          out.cell(3, 0).text.strip(), "")
+    print("\n[5] Столбец 1: номера текстом (numPr в фикстуре нет)")
+    check("строка 1, столбец 1 = '1'",
+          out.cell(1, 0).text.strip(), "1")
+    check("строка 2, столбец 1 = '2'",
+          out.cell(2, 0).text.strip(), "2")
+    check("строка 3, столбец 1 = '3'",
+          out.cell(3, 0).text.strip(), "3")
 
     print("\n[6] Идемпотентность: повторный вызов даёт те же 4 строки")
     info2 = import_excel_to_act(str(xlsx), str(docx),
