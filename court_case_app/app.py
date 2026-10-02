@@ -234,6 +234,11 @@ app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 МБ
 # Модуль «Внутренняя опись» (Word -> лист «Таблица»), этап 14e.
 register_inventory_routes(app, lambda: (OUTPUT_DIR, UPLOAD_DIR))
 
+# stage_49c: веб-редактор Внутренней описи (акт уничтожения).
+app.config["DB_PATH"] = DB_PATH
+from inventory_editor_routes import inventory_editor_bp  # noqa: E402
+app.register_blueprint(inventory_editor_bp)
+
 
 def get_db():
     """Соединение с БД (создание/наполнение при первом обращении)."""
